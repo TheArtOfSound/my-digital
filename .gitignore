@@ -1,0 +1,17 @@
+node_modules
+.pnpm-store
+.next
+dist
+build
+coverage
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+.turbo
+.vercel
+.cache
+.sqlite
+*.sqlite
+*.db
