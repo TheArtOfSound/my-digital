@@ -1,0 +1,21 @@
+{
+  "name": "@my-digital/envelope",
+  "version": "0.0.1-foundation",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"@my-digital/envelope: tests pending\"",
+    "lint": "echo \"@my-digital/envelope: lint not configured yet\""
+  },
+  "dependencies": {
+    "@my-digital/core": "workspace:*",
+    "@my-digital/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
