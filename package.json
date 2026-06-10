@@ -1,0 +1,22 @@
+{
+  "name": "my-digital",
+  "private": true,
+  "version": "0.0.1-foundation",
+  "description": "QEV-powered locked digital goods commerce foundation.",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --filter @my-digital/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint"
+  },
+  "keywords": [
+    "qev",
+    "digital-goods",
+    "encrypted-assets",
+    "licenses",
+    "marketplace"
+  ],
+  "license": "UNLICENSED"
+}
