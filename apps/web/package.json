@@ -1,0 +1,27 @@
+{
+  "name": "@my-digital/web",
+  "version": "0.0.1-foundation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "tsc -p tsconfig.json && vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"@my-digital/web: tests pending\"",
+    "lint": "echo \"@my-digital/web: lint not configured yet\""
+  },
+  "dependencies": {
+    "@my-digital/core": "workspace:*",
+    "@my-digital/envelope": "workspace:*",
+    "@my-digital/types": "workspace:*",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7",
+    "typescript": "^5.7.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2"
+  }
+}
