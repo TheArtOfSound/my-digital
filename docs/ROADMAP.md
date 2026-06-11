@@ -6,7 +6,7 @@ Build the smallest honest QEV commerce primitive first. Do not build a broad mar
 
 ## Stage 0 — Repo foundation
 
-Status: in progress.
+Status: complete (validated 2026-06-10).
 
 Required:
 
@@ -28,6 +28,8 @@ Exit criteria:
 - packages typecheck/build
 
 ## Stage 1 — Local lifecycle demo
+
+Status: complete (2026-06-10). Run with `pnpm demo`; tests cover pass/fail verification.
 
 Goal: prove the product loop without real payments or production QEV crypto.
 
@@ -56,6 +58,8 @@ Exit criteria:
 
 ## Stage 2 — Web shell
 
+Status: complete (2026-06-11). All routes wired to core lifecycle functions; state persists in browser localStorage; lifecycle completed visually including revocation and tamper-failure demos.
+
 Goal: make the flow visible and usable.
 
 Routes:
@@ -76,6 +80,8 @@ Exit criteria:
 - user can complete demo lifecycle visually
 
 ## Stage 3 — Persistence
+
+Status: complete (2026-06-11). `@my-digital/store` provides the storage interface with SQLite (Drizzle + better-sqlite3) and in-memory implementations, committed migrations, `pnpm db:seed`, and fresh-process `pnpm db:verify`. Web app stays on its labeled localStorage demo store until the API server arrives with Stage 4.
 
 Goal: replace in-memory state with local/dev database.
 
@@ -106,6 +112,8 @@ Exit criteria:
 - seed/demo command exists
 
 ## Stage 4 — Payment abstraction
+
+Status: next.
 
 Goal: payment-confirmed license issuance.
 

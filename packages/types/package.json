@@ -3,10 +3,10 @@
   "version": "0.0.1-foundation",
   "private": true,
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "echo \"@my-digital/types: no tests yet\"",
     "lint": "echo \"@my-digital/types: lint not configured yet\""

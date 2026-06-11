@@ -1,58 +1,86 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { BrowserRouter, Link, NavLink, Outlet, Route, Routes } from "react-router-dom";
+import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
+import { CheckoutPage } from "./pages/CheckoutPage";
+import { CreatorPage } from "./pages/CreatorPage";
+import { HomePage } from "./pages/HomePage";
+import { ListingPage } from "./pages/ListingPage";
+import { SellPage } from "./pages/SellPage";
+import { UnlockPage } from "./pages/UnlockPage";
+import { VerifyPage } from "./pages/VerifyPage";
 import "./styles.css";
 
-const lifecycle = ["CREATE", "LOCK", "LIST", "BUY", "LICENSE", "UNLOCK", "VERIFY", "TRACE"];
+function Layout() {
+  const { status, unsupportedReason } = useMarketplace();
 
-function App() {
   return (
-    <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">QEV commerce extension</p>
-        <h1>Sell digital products as locked, verifiable assets.</h1>
-        <p className="subhead">
-          My Digital is the QEV-powered commerce primitive for encrypted digital goods,
-          buyer-specific unlock licenses, tamper verification, and proof-of-purchase receipts.
-        </p>
-        <div className="notice">
-          <strong>Foundation build:</strong> this app starts with a clearly labeled demo envelope adapter.
-          Production QEV Vault V2 integration comes after the lifecycle works end-to-end.
+    <div className="shell">
+      <nav className="nav">
+        <Link className="brand" to="/">
+          My Digital
+        </Link>
+        <div className="nav-links">
+          <NavLink to="/sell">Sell</NavLink>
+          <NavLink to="/unlock">Unlock</NavLink>
+          <NavLink to="/verify">Verify</NavLink>
+          <NavLink to="/creator">Creator</NavLink>
         </div>
-      </section>
+        <span className="pill pill-demo">DEMO MODE</span>
+      </nav>
 
-      <section className="panel">
-        <h2>Core lifecycle</h2>
-        <div className="lifecycle">
-          {lifecycle.map((step) => (
-            <span className="step" key={step}>{step}</span>
-          ))}
-        </div>
-      </section>
+      {status === "loading" && (
+        <section className="panel">
+          <p>Preparing the demo marketplace…</p>
+        </section>
+      )}
+      {status === "unsupported" && (
+        <section className="panel panel-error-block">
+          <h2>Browser not supported</h2>
+          <p>{unsupportedReason}</p>
+        </section>
+      )}
+      {status === "ready" && <Outlet />}
 
-      <section className="grid">
-        <article className="card">
-          <h3>Creator promise</h3>
-          <p>Lock files into QEV-style asset envelopes and sell them with clear license terms.</p>
-        </article>
-        <article className="card">
-          <h3>Buyer promise</h3>
-          <p>Receive a buyer-specific unlock credential and a verifiable purchase receipt.</p>
-        </article>
-        <article className="card">
-          <h3>Trust promise</h3>
-          <p>Verify asset integrity, license binding, and receipt status without vague security theater.</p>
-        </article>
-      </section>
-
-      <section className="panel muted">
-        <h2>Build rule</h2>
+      <footer className="footer">
         <p>
-          This product improves controlled access, proof, and traceability. It must remain honest about
-          what it verifies, what it does not verify, and what remains outside the application boundary.
+          Demo build. Envelope locking is simulated and labeled; SHA-256 hashes and Ed25519 issuer
+          signatures are real. All records stay in this browser. Decrypted output is never
+          persisted. This product does not claim to make piracy impossible.
         </p>
-      </section>
-    </main>
+      </footer>
+    </div>
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+function NotFoundPage() {
+  return (
+    <section className="panel">
+      <h2>Page not found</h2>
+      <p>
+        <Link to="/">Back to the landing page</Link>.
+      </p>
+    </section>
+  );
+}
+
+createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <MarketplaceProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route index element={<HomePage />} />
+            <Route path="/sell" element={<SellPage />} />
+            <Route path="/listing/:listingId" element={<ListingPage />} />
+            <Route path="/checkout/:listingId" element={<CheckoutPage />} />
+            <Route path="/unlock" element={<UnlockPage />} />
+            <Route path="/verify" element={<VerifyPage />} />
+            <Route path="/creator" element={<CreatorPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </MarketplaceProvider>
+  </React.StrictMode>
+);

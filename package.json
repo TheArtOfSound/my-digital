@@ -6,6 +6,9 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "pnpm --filter @my-digital/web dev",
+    "demo": "pnpm --filter @my-digital/lifecycle-demo demo",
+    "db:seed": "pnpm --filter @my-digital/lifecycle-demo seed",
+    "db:verify": "pnpm --filter @my-digital/lifecycle-demo verify-db",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

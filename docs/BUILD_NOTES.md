@@ -33,3 +33,126 @@ Next expected action:
 - Validate workspace install/typecheck/build.
 - Add `apps/web` with minimal Vite React shell.
 - Add local lifecycle demo using `@my-digital/types`, `@my-digital/core`, and `@my-digital/envelope`.
+
+## 2026-06-10 validation and positioning pass
+
+Validated Stage 0 exit criteria from a fresh clone. Two failures found and fixed:
+
+- `pnpm typecheck` failed in `@my-digital/core`: workspace packages pointed `main`/`types` at `dist/`, which does not exist before a build, so a fresh clone could never typecheck. Internal packages now export `src/index.ts` directly (internal-package pattern). No package emits `dist`; `apps/web` produces the only build artifact. Package `build` scripts are now no-emit type checks. Dist emission can return when a package needs standalone publishing.
+- `pnpm build` failed in `@my-digital/envelope`: `crypto.subtle.digest` rejected `Uint8Array<ArrayBufferLike>` under TS 5.7 generic typed-array rules. `sha256Hex` now copies input into a fresh `Uint8Array` before digesting.
+
+Current state: `pnpm install`, `pnpm typecheck`, `pnpm build`, and `pnpm test` all pass from a fresh clone. Tests are still placeholder echoes; real tests arrive with Stage 1.
+
+Added `docs/POSITIONING.md`: competitive landscape, lane statement, wedge, first niches, objection handling, and proposed domain plan (`mydigital.imagineqira.com` for the app, receipts verified at `/verify/<receiptId>`, offline verification remains the trust root).
+
+Next expected action:
+
+- Stage 1 local lifecycle demo with real tests (vitest): create -> lock -> list -> simulated paid purchase -> license -> unlock -> verify -> receipt, plus a tamper case that must fail verification.
+
+## 2026-06-10 Stage 1 lifecycle pass
+
+Implemented the full local lifecycle demo (roadmap Stage 1, execution brief Phase 2). All 13 required flow steps run, are tested, and are runnable via `pnpm demo`.
+
+Added to `@my-digital/types`:
+
+- `AssetManifest` (schema `MYDIGITAL-ASSET-MANIFEST-V1`)
+- `Fingerprint` and `Revocation` interfaces (closing the Phase 1 type list)
+- The `EnvelopeAdapter` contract (`EnvelopeAdapter`, lock/unlock/verify input/output types) moved here from `@my-digital/envelope` so core can orchestrate against the interface without a circular dependency. Envelope re-exports them.
+
+Added to `@my-digital/core`:
+
+- `ids.ts` prefixed ID factories matching the data model conventions
+- `encoding.ts` / `hash.ts` shared base64/utf8/SHA-256 helpers (`sha256Hex` moved here from envelope)
+- `signing.ts` Ed25519 signatures over canonical JSON via WebCrypto
+- `manifest.ts` asset manifest creation and hashing
+- `entities.ts` creator/buyer/asset/version/locked-record/listing factories and the mock paid purchase
+- `licenses.ts` buyer license issuance and structured verification
+- `unlock-codes.ts` unlock code generation (hash-only storage), verification, redemption
+- `receipts.ts` proof receipt generation and verification, with `verificationUrl` support
+- `lifecycle.ts` `runLifecycleDemo` orchestrating all 13 roadmap steps, gating unlock on verification, including the mandatory tamper-failure check
+
+Changed in `@my-digital/envelope`:
+
+- Demo adapter no longer returns plaintext without license material and fails structurally (instead of throwing) on corrupted envelopes
+- Helper functions now come from `@my-digital/core`
+
+Added `apps/lifecycle-demo`:
+
+- `pnpm demo` runs the full lifecycle with readable step/verification output and exits non-zero if any step misbehaves
+- End-to-end tests covering the full loop
+
+What is real vs simulated:
+
+- REAL: SHA-256 content/manifest/payload hashing, Ed25519 issuer signatures over canonical JSON, unlock-code hashing, tamper detection against recorded hashes and signatures.
+- DEMO-ONLY: the envelope lock itself (base64 wrapper, labeled in payload, results, and UI text), the payment provider (`mock`), and issuer key management (ephemeral in-memory keypair, no PKI). License signatures cover the immutable claim only, so later revocation does not invalidate the issuance signature — the same deterministic canonical-binding concept as upstream QEV.
+
+Validation:
+
+- `pnpm typecheck`, `pnpm build`, `pnpm test`, `pnpm demo` all pass from fresh clone
+- 45 tests: 33 in core, 8 on the demo envelope adapter, 4 end-to-end
+- Tamper cases fail verification as required; happy paths pass; demo-only warnings appear in every envelope verification result
+
+Next expected action:
+
+- Stage 2 web shell: wire `/sell`, `/listing/:id`, `/checkout/:id`, `/unlock`, `/verify`, `/creator` routes to the same core lifecycle functions with clearly labeled demo state.
+
+## 2026-06-11 Stage 2 web shell pass
+
+Implemented the full web shell (roadmap Stage 2, execution brief Phase 3). All routes exist and run the same `@my-digital/core` functions used by the Stage 1 demo: `/` landing with live listings, `/sell` lock-and-list flow, `/listing/:id`, `/checkout/:id` mock checkout, `/unlock`, `/verify`, `/creator` dashboard.
+
+Structure:
+
+- `apps/web/src/lib/marketplace.tsx` — React context store; demo records persist in browser localStorage (`mydigital-demo-marketplace-v1`); locked payloads stored base64-encoded; capped at 2 MB per file.
+- `apps/web/src/lib/serialization.ts` — pure state serialization with schema versioning, covered by vitest.
+- `apps/web/src/components/VerificationResultView.tsx` — renders the full structured result: checks passed, failed, not checked, warnings, and assumptions. No bare booleans anywhere in the UI.
+- React Router v7, React 19, no extra state libraries.
+
+Honesty properties verified by driving the UI in a real browser:
+
+- The raw unlock code appears once on the checkout confirmation and is never written to storage (only its SHA-256 hash; checked against the serialized state).
+- Unlock is gated: license, unlock code, and envelope verification run first; any failure blocks plaintext.
+- Revoking a license from the creator dashboard creates a signed `Revocation` record, and subsequent unlock attempts fail with `LICENSE_REVOKED` while `LICENSE_SIGNATURE_VALID` still passes (signature covers the immutable claim).
+- The `/verify` page includes a labeled tamper simulation (flips one byte of an in-memory copy) that fails with `LOCKED_PAYLOAD_HASH_MISMATCH`.
+- Demo labels persist everywhere: DEMO MODE pill, demo-adapter notices, mock-payment notice, warning-status envelope results, and a footer stating what is real vs simulated.
+
+Demo-only compromises, labeled in the UI:
+
+- The issuer private key (Ed25519 JWK) is stored unprotected in localStorage so the demo survives reloads. The creator dashboard states this. Production issuance must never do this.
+- Receipts embed `verificationUrl` under the proposed `https://mydigital.imagineqira.com/verify/<receiptId>` base; the URL is a convenience pointer, the signed artifact remains the trust root.
+
+Browser requirement: WebCrypto Ed25519 (current Chrome, Safari, Firefox). The app feature-detects and shows a clear unsupported message otherwise.
+
+Validation:
+
+- `pnpm typecheck`, `pnpm build`, `pnpm test` (49 tests across core, envelope, web serialization, lifecycle e2e), `pnpm demo` all pass.
+- Full lifecycle completed visually in a browser: creator setup -> lock/list -> listing -> mock checkout -> unlock (pass) -> verify receipt (pass) -> tamper simulation (fail as expected) -> revoke -> unlock blocked. State survived full page reloads between every step.
+
+Next expected action:
+
+- Stage 3 persistence: replace browser localStorage with SQLite + Drizzle or Prisma behind a storage interface, with committed migrations and a seed command.
+
+## 2026-06-11 Stage 3 persistence pass
+
+Added `packages/store`: a `MarketplaceStore` interface with two implementations behind it — `MemoryMarketplaceStore` (tests/ephemeral) and `SqliteMarketplaceStore` (Drizzle ORM + better-sqlite3). One conformance test suite runs against both implementations (30 tests), so the SQLite store is proven to behave identically to the in-memory reference.
+
+Schema (`packages/store/src/schema.ts`) covers all twelve required tables — creators, buyers, assets, asset_versions, locked_assets, listings, purchases, licenses, unlock_codes, proof_receipts, fingerprints, revocations — plus two more:
+
+- `locked_payloads`: locked payload bytes as BLOBs (local/dev storage; production moves to object storage behind `storageUri`)
+- `issuers`: issuer name + public key only. Private signing keys never enter the marketplace database. Asset manifests are stored as a JSON column on `asset_versions` rather than a separate table.
+
+Migrations are generated by drizzle-kit and committed under `packages/store/drizzle/`; `openSqliteStore` applies them automatically on open. Foreign keys are enforced (`PRAGMA foreign_keys = ON`); writes use WAL.
+
+Commands (roadmap exit criteria):
+
+- `pnpm db:seed` — destructive demo seed: resets the database, runs the full lifecycle via `runLifecycleDemo`, persists every record, prints the raw unlock code once (only its hash is stored).
+- `pnpm db:verify [rawCode]` — fresh-process verification: loads the issuer public key and all records from disk, re-verifies license (pass), envelope hash (warning, demo), a tampered in-memory copy (must fail), receipt (pass), and — when the raw code is supplied — the unlock code plus a real unlock whose plaintext SHA-256 must match the recorded content hash. Exits non-zero on any unexpected status. Without the code it prints "not checked" rather than implying coverage.
+
+Verified: seed in one process, verify in a separate process (restart survival), both with and without the unlock code. Database lives at `apps/lifecycle-demo/data/my-digital-demo.sqlite` (gitignored), overridable via `MYDIGITAL_DB`.
+
+Scope note: the web app intentionally still uses its labeled browser-localStorage demo store. Moving the web app onto this database requires an API server boundary, which belongs with the payment adapter work (Stage 4) rather than half-done here.
+
+Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (79 tests), `pnpm demo`, `pnpm db:seed`, `pnpm db:verify` all pass.
+
+Next expected action:
+
+- Stage 4 payment abstraction: `PaymentAdapter` interface with a mocked adapter, license issuance only after paid confirmation, tests proving unpaid purchases cannot obtain valid licenses — ideally introduced together with a thin API server over `@my-digital/store` so the web app can move off localStorage.

@@ -1,53 +1,47 @@
-import { createVerificationResult, inferVerificationStatus } from "@my-digital/core";
-import type { AssetVersionId, LockedAssetId, VerificationResult } from "@my-digital/types";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  createVerificationResult,
+  inferVerificationStatus,
+  newLockedAssetId,
+  sha256Hex
+} from "@my-digital/core";
+import type {
+  EnvelopeAdapter,
+  EnvelopeLockInput,
+  EnvelopeLockResult,
+  EnvelopeUnlockInput,
+  EnvelopeUnlockResult,
+  EnvelopeVerifyInput,
+  VerificationCheck,
+  VerificationResult
+} from "@my-digital/types";
 
-export interface EnvelopeAdapter {
-  lock(input: EnvelopeLockInput): Promise<EnvelopeLockResult>;
-  unlock(input: EnvelopeUnlockInput): Promise<EnvelopeUnlockResult>;
-  verify(input: EnvelopeVerifyInput): Promise<VerificationResult>;
-}
+export type {
+  EnvelopeAdapter,
+  EnvelopeLockInput,
+  EnvelopeLockResult,
+  EnvelopeUnlockInput,
+  EnvelopeUnlockResult,
+  EnvelopeVerifyInput
+} from "@my-digital/types";
 
-export interface EnvelopeLockInput {
-  assetVersionId: AssetVersionId;
-  fileName: string;
-  mimeType: string;
-  plaintext: Uint8Array;
-}
+const DEMO_WARNING = "DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING";
 
-export interface EnvelopeLockResult {
-  lockedAssetId: LockedAssetId;
-  envelopeFormat: string;
-  envelopeVersion: string;
-  lockedPayload: Uint8Array;
-  lockedPayloadHash: string;
-  metadataHash: string;
-  qevEngineVersion: string;
-  developmentOnly: boolean;
-}
+const demoOnlyWarning: VerificationCheck = {
+  code: "DEMO_ONLY",
+  label: "Demo-only envelope adapter",
+  detail:
+    "This adapter exists for lifecycle testing only and does not provide production cryptographic security."
+};
 
-export interface EnvelopeUnlockInput {
-  lockedPayload: Uint8Array;
-  licenseMaterial: string;
-}
-
-export interface EnvelopeUnlockResult {
-  plaintext: Uint8Array;
-  verification: VerificationResult;
-}
-
-export interface EnvelopeVerifyInput {
-  lockedAssetId: LockedAssetId;
-  expectedLockedPayloadHash: string;
-  actualLockedPayloadHash: string;
-  expectedMetadataHash?: string;
-  actualMetadataHash?: string;
-}
+const demoAssumptions = ["Production QEV envelope integration will replace this adapter."];
 
 export class DemoEnvelopeAdapter implements EnvelopeAdapter {
   async lock(input: EnvelopeLockInput): Promise<EnvelopeLockResult> {
     const lockedPayload = new TextEncoder().encode(
       JSON.stringify({
-        warning: "DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING",
+        warning: DEMO_WARNING,
         fileName: input.fileName,
         mimeType: input.mimeType,
         payloadBase64: bytesToBase64(input.plaintext)
@@ -55,57 +49,84 @@ export class DemoEnvelopeAdapter implements EnvelopeAdapter {
     );
 
     return {
-      lockedAssetId: `locked_${crypto.randomUUID()}` as LockedAssetId,
+      lockedAssetId: newLockedAssetId(),
       envelopeFormat: "MYDIGITAL-DEMO-ENVELOPE",
       envelopeVersion: "0.0.1-demo",
       lockedPayload,
       lockedPayloadHash: await sha256Hex(lockedPayload),
-      metadataHash: await sha256Hex(new TextEncoder().encode(`${input.fileName}:${input.mimeType}`)),
+      metadataHash: await sha256Hex(
+        new TextEncoder().encode(`${input.fileName}:${input.mimeType}`)
+      ),
       qevEngineVersion: "demo-adapter-not-qev-production",
       developmentOnly: true
     };
   }
 
   async unlock(input: EnvelopeUnlockInput): Promise<EnvelopeUnlockResult> {
-    const decoded = JSON.parse(new TextDecoder().decode(input.lockedPayload)) as { payloadBase64?: string };
-    const plaintext = decoded.payloadBase64 ? base64ToBytes(decoded.payloadBase64) : new Uint8Array();
+    if (input.licenseMaterial.length === 0) {
+      return this.failedUnlock({
+        code: "MISSING_LICENSE_MATERIAL",
+        label: "Missing license material",
+        detail: "Demo unlock requires a non-empty license material string. No payload was returned."
+      });
+    }
+
+    let decoded: { payloadBase64?: unknown };
+    try {
+      decoded = JSON.parse(new TextDecoder().decode(input.lockedPayload)) as {
+        payloadBase64?: unknown;
+      };
+    } catch {
+      return this.failedUnlock({
+        code: "ENVELOPE_PARSE_FAILED",
+        label: "Envelope parse failed",
+        detail: "The locked payload is not a readable demo envelope. It may be corrupted or tampered with."
+      });
+    }
+
+    if (typeof decoded.payloadBase64 !== "string") {
+      return this.failedUnlock({
+        code: "ENVELOPE_PAYLOAD_MISSING",
+        label: "Envelope payload missing",
+        detail: "The demo envelope does not contain an embedded payload field."
+      });
+    }
+
+    let plaintext: Uint8Array;
+    try {
+      plaintext = base64ToBytes(decoded.payloadBase64);
+    } catch {
+      return this.failedUnlock({
+        code: "ENVELOPE_PAYLOAD_DECODE_FAILED",
+        label: "Envelope payload decode failed",
+        detail: "The embedded payload could not be decoded. The envelope may be corrupted or tampered with."
+      });
+    }
 
     return {
       plaintext,
       verification: createVerificationResult({
         subjectType: "demo-envelope-unlock",
         subjectId: "demo",
-        status: input.licenseMaterial.length > 0 ? "warning" : "fail",
-        checksPassed: input.licenseMaterial.length > 0 ? [
+        status: "warning",
+        checksPassed: [
           {
             code: "DEMO_LICENSE_MATERIAL_PRESENT",
             label: "Demo license material present",
-            detail: "A non-empty license material string was supplied. This is not production license verification."
-          }
-        ] : [],
-        checksFailed: input.licenseMaterial.length === 0 ? [
-          {
-            code: "MISSING_LICENSE_MATERIAL",
-            label: "Missing license material",
-            detail: "Demo unlock requires a non-empty license material string."
-          }
-        ] : [],
-        warnings: [
-          {
-            code: "DEMO_ONLY",
-            label: "Demo-only unlock",
-            detail: "This adapter is for lifecycle testing only and does not provide production cryptographic security."
+            detail:
+              "A non-empty license material string was supplied. This is not production license verification."
           }
         ],
-        assumptions: ["Production QEV envelope integration will replace this adapter."],
+        warnings: [demoOnlyWarning],
+        assumptions: demoAssumptions,
         artifacts: ["MYDIGITAL-DEMO-ENVELOPE"]
       })
     };
   }
 
   async verify(input: EnvelopeVerifyInput): Promise<VerificationResult> {
-    const checksFailed = [];
-    const checksPassed = [];
+    const checksFailed: VerificationCheck[] = [];
+    const checksPassed: VerificationCheck[] = [];
 
     if (input.expectedLockedPayloadHash === input.actualLockedPayloadHash) {
       checksPassed.push({
@@ -147,27 +168,27 @@ export class DemoEnvelopeAdapter implements EnvelopeAdapter {
         {
           code: "DEMO_ONLY",
           label: "Demo-only envelope verification",
-          detail: "This verifies lifecycle hashes only. It is not production QEV cryptographic verification."
+          detail:
+            "This verifies lifecycle hashes only. It is not production QEV cryptographic verification."
         }
       ],
       assumptions: ["Expected hashes come from trusted marketplace records."],
       artifacts: [input.lockedAssetId]
     });
   }
-}
 
-export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  private failedUnlock(failure: VerificationCheck): EnvelopeUnlockResult {
+    return {
+      plaintext: new Uint8Array(),
+      verification: createVerificationResult({
+        subjectType: "demo-envelope-unlock",
+        subjectId: "demo",
+        status: "fail",
+        checksFailed: [failure],
+        warnings: [demoOnlyWarning],
+        assumptions: demoAssumptions,
+        artifacts: ["MYDIGITAL-DEMO-ENVELOPE"]
+      })
+    };
+  }
 }

@@ -168,3 +168,79 @@ export interface VerificationResult {
   assumptions: string[];
   artifacts: string[];
 }
+
+export interface Fingerprint {
+  id: FingerprintId;
+  licenseId: LicenseId;
+  assetVersionId: AssetVersionId;
+  fingerprintType: string;
+  fingerprintHash: string;
+  embeddingStrategy: string;
+  confidenceModel: string;
+  createdAt: string;
+}
+
+export interface Revocation {
+  id: RevocationId;
+  targetType: "license" | "unlockCode";
+  targetId: string;
+  reason: string;
+  createdAt: string;
+  createdBy: string;
+  issuerSignature: string;
+}
+
+export interface AssetManifest {
+  schema: "MYDIGITAL-ASSET-MANIFEST-V1";
+  assetId: AssetId;
+  assetVersionId: AssetVersionId;
+  creatorId: CreatorId;
+  versionLabel: string;
+  fileName: string;
+  mimeType: string;
+  byteSize: number;
+  contentHash: string;
+  createdAt: string;
+}
+
+export interface EnvelopeLockInput {
+  assetVersionId: AssetVersionId;
+  fileName: string;
+  mimeType: string;
+  plaintext: Uint8Array;
+}
+
+export interface EnvelopeLockResult {
+  lockedAssetId: LockedAssetId;
+  envelopeFormat: string;
+  envelopeVersion: string;
+  lockedPayload: Uint8Array;
+  lockedPayloadHash: string;
+  metadataHash: string;
+  qevEngineVersion: string;
+  developmentOnly: boolean;
+}
+
+export interface EnvelopeUnlockInput {
+  lockedPayload: Uint8Array;
+  licenseMaterial: string;
+}
+
+export interface EnvelopeUnlockResult {
+  plaintext: Uint8Array;
+  verification: VerificationResult;
+}
+
+export interface EnvelopeVerifyInput {
+  lockedAssetId: LockedAssetId;
+  expectedLockedPayloadHash: string;
+  actualLockedPayloadHash: string;
+  expectedMetadataHash?: string;
+  actualMetadataHash?: string;
+}
+
+export interface EnvelopeAdapter {
+  lock(input: EnvelopeLockInput): Promise<EnvelopeLockResult>;
+  unlock(input: EnvelopeUnlockInput): Promise<EnvelopeUnlockResult>;
+  verify(input: EnvelopeVerifyInput): Promise<VerificationResult>;
+}
