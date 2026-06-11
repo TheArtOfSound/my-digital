@@ -244,3 +244,41 @@ export interface EnvelopeAdapter {
   unlock(input: EnvelopeUnlockInput): Promise<EnvelopeUnlockResult>;
   verify(input: EnvelopeVerifyInput): Promise<VerificationResult>;
 }
+
+export type CheckoutSessionId = Brand<string, "CheckoutSessionId">;
+
+export interface CheckoutSession {
+  id: CheckoutSessionId;
+  listingId: ListingId;
+  buyerId: BuyerId;
+  amount: number;
+  currency: string;
+  status: "open" | "paid" | "failed" | "expired";
+  provider: "mock" | "stripe";
+  providerReference: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface CreateCheckoutInput {
+  listing: Listing;
+  buyer: Buyer;
+}
+
+export interface ConfirmPaymentInput {
+  sessionId: CheckoutSessionId;
+  /** Mock adapter only: which outcome the simulated provider reports. Real adapters ignore this. */
+  simulateOutcome?: "paid" | "failed";
+}
+
+export interface PaymentConfirmation {
+  session: CheckoutSession;
+  outcome: "paid" | "failed";
+  providerEventId: string;
+  occurredAt: string;
+}
+
+export interface PaymentAdapter {
+  createCheckout(input: CreateCheckoutInput): Promise<CheckoutSession>;
+  confirmPayment(input: ConfirmPaymentInput): Promise<PaymentConfirmation>;
+}

@@ -1,6 +1,8 @@
 import {
+  MockPaymentAdapter,
   base64ToBytes,
   bytesToBase64,
+  completeMockCheckout,
   createAsset,
   createAssetVersion,
   createBuyer,
@@ -17,7 +19,6 @@ import {
   redeemUnlockCode,
   sha256Hex,
   signCanonical,
-  simulatePaidPurchase,
   verifyBuyerLicense,
   verifyProofReceipt,
   verifyUnlockCode
@@ -101,6 +102,10 @@ export interface PurchaseBundle {
   receipt: ProofReceipt;
 }
 
+export type CheckoutResult =
+  | ({ outcome: "paid" } & PurchaseBundle)
+  | { outcome: "failed"; buyer: Buyer; purchase: Purchase };
+
 export interface UnlockOutcome {
   license: BuyerLicense;
   fileName: string;
@@ -127,7 +132,8 @@ interface MarketplaceActions {
     listingId: ListingId;
     email: string;
     displayName?: string;
-  }): Promise<PurchaseBundle>;
+    simulateOutcome?: "paid" | "failed";
+  }): Promise<CheckoutResult>;
   unlockWithCode(input: { licenseId: LicenseId; rawCode: string }): Promise<UnlockOutcome>;
   revokeLicense(licenseId: LicenseId, reason: string): Promise<Revocation>;
   verifyLicenseRecord(licenseId: LicenseId): Promise<VerificationResult>;
@@ -158,6 +164,8 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const privateKeyRef = useRef<CryptoKey | null>(null);
   const publicKeyRef = useRef<CryptoKey | null>(null);
   const adapter = useMemo(() => new DemoEnvelopeAdapter(), []);
+  // Checkout sessions live in the adapter only; they are not persisted demo records.
+  const payments = useMemo(() => new MockPaymentAdapter(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -366,7 +374,22 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
               : { email: input.email }
           ));
 
-        const purchase = simulatePaidPurchase({ listing, buyer });
+        const checkout = await completeMockCheckout(payments, {
+          listing,
+          buyer,
+          ...(input.simulateOutcome === "failed" ? { simulateOutcome: "failed" as const } : {})
+        });
+        const purchase = checkout.purchase;
+        if (purchase.status !== "paid") {
+          apply({
+            ...stateNow,
+            buyers: stateNow.buyers.some((entry) => entry.id === buyer.id)
+              ? stateNow.buyers
+              : [...stateNow.buyers, buyer],
+            purchases: [...stateNow.purchases, purchase]
+          });
+          return { outcome: "failed", buyer, purchase };
+        }
         const license = await issueBuyerLicense({
           purchase,
           buyer,
@@ -396,7 +419,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
           unlockCodes: [...stateNow.unlockCodes, unlockCode],
           receipts: [...stateNow.receipts, receipt]
         });
-        return { buyer, purchase, license, unlockCode, rawUnlockCode: rawCode, receipt };
+        return { outcome: "paid", buyer, purchase, license, unlockCode, rawUnlockCode: rawCode, receipt };
       },
 
       async unlockWithCode(input) {
@@ -618,7 +641,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         window.location.reload();
       }
     };
-  }, [adapter]);
+  }, [adapter, payments]);
 
   const value = useMemo<MarketplaceContextValue>(
     () => ({ status, unsupportedReason, state, actions }),

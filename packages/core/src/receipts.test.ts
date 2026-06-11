@@ -8,10 +8,10 @@ import {
   createCreator,
   createListing,
   createLockedAssetRecord,
-  demoPersonalLicenseTerms,
-  simulatePaidPurchase
+  demoPersonalLicenseTerms
 } from "./entities";
 import { issueBuyerLicense } from "./licenses";
+import { MockPaymentAdapter, completeMockCheckout } from "./payments";
 import { generateProofReceipt, verifyProofReceipt } from "./receipts";
 import { generateIssuerSigningKeys } from "./signing";
 import type { EnvelopeLockResult, LockedAssetId } from "@my-digital/types";
@@ -58,7 +58,7 @@ async function receiptFixture() {
     priceCurrency: "USD",
     licenseTerms: demoPersonalLicenseTerms
   });
-  const purchase = simulatePaidPurchase({ listing, buyer });
+  const { purchase } = await completeMockCheckout(new MockPaymentAdapter(), { listing, buyer });
   const license = await issueBuyerLicense({
     purchase,
     buyer,

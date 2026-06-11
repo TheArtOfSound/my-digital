@@ -22,11 +22,11 @@ import {
   createCreator,
   createListing,
   createLockedAssetRecord,
-  demoPersonalLicenseTerms,
-  simulatePaidPurchase
+  demoPersonalLicenseTerms
 } from "./entities";
 import { sha256Hex } from "./hash";
 import { issueBuyerLicense, verifyBuyerLicense } from "./licenses";
+import { MockPaymentAdapter, completeMockCheckout } from "./payments";
 import { generateProofReceipt, verifyProofReceipt } from "./receipts";
 import { generateIssuerSigningKeys } from "./signing";
 import { issueUnlockCode, redeemUnlockCode, verifyUnlockCode } from "./unlock-codes";
@@ -167,8 +167,17 @@ export async function runLifecycleDemo(
   asset = { ...asset, status: "listed" };
   note(6, "create listing", true, `${listing.id} ${listing.priceAmount} ${listing.priceCurrency}`);
 
-  const purchase = simulatePaidPurchase({ listing, buyer });
-  note(7, "simulate paid purchase (mock provider)", true, `${purchase.id} status=${purchase.status}`);
+  const checkout = await completeMockCheckout(new MockPaymentAdapter(), { listing, buyer });
+  const purchase = checkout.purchase;
+  note(
+    7,
+    "checkout via mock payment adapter (paid event)",
+    purchase.status === "paid",
+    `${purchase.id} session=${checkout.session.id} status=${purchase.status}`
+  );
+  if (purchase.status !== "paid") {
+    throw new Error("Lifecycle demo aborted: mock payment did not confirm as paid.");
+  }
 
   const license = await issueBuyerLicense({
     purchase,

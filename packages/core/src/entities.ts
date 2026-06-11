@@ -9,18 +9,10 @@ import type {
   EnvelopeLockResult,
   LicenseTerms,
   Listing,
-  LockedAsset,
-  Purchase
+  LockedAsset
 } from "@my-digital/types";
 import { sha256HexOfString } from "./hash";
-import {
-  newAssetId,
-  newBuyerId,
-  newCreatorId,
-  newListingId,
-  newPurchaseId,
-  newAssetVersionId
-} from "./ids";
+import { newAssetId, newBuyerId, newCreatorId, newListingId, newAssetVersionId } from "./ids";
 import { createAssetManifest } from "./manifest";
 
 export const demoPersonalLicenseTerms: LicenseTerms = {
@@ -174,26 +166,5 @@ export function createListing(input: {
     status: "active",
     createdAt,
     updatedAt: createdAt
-  };
-}
-
-export function simulatePaidPurchase(input: {
-  listing: Listing;
-  buyer: Buyer;
-  createdAt?: string;
-}): Purchase {
-  const createdAt = input.createdAt ?? new Date().toISOString();
-  return {
-    id: newPurchaseId(),
-    listingId: input.listing.id,
-    buyerId: input.buyer.id,
-    assetVersionId: input.listing.activeAssetVersionId,
-    paymentProvider: "mock",
-    paymentProviderReference: `mockpay_${crypto.randomUUID()}`,
-    amountPaid: input.listing.priceAmount,
-    currency: input.listing.priceCurrency,
-    status: "paid",
-    createdAt,
-    paidAt: createdAt
   };
 }

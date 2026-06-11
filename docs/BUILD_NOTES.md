@@ -156,3 +156,24 @@ Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (79 tests), `pnpm demo`,
 Next expected action:
 
 - Stage 4 payment abstraction: `PaymentAdapter` interface with a mocked adapter, license issuance only after paid confirmation, tests proving unpaid purchases cannot obtain valid licenses — ideally introduced together with a thin API server over `@my-digital/store` so the web app can move off localStorage.
+
+## 2026-06-11 Stage 4 payment abstraction pass
+
+Added the payment boundary. The `PaymentAdapter` contract (`createCheckout`/`confirmPayment`, per the architecture doc) lives in `@my-digital/types`; `@my-digital/core` gains `payments.ts` with:
+
+- `MockPaymentAdapter` — simulates a provider, moves no money. Checkout sessions are adapter-side state (not yet persisted records). Repeated confirmations are idempotent (provider events are at-least-once); flipping a completed session to a different outcome is refused.
+- `createPendingPurchase` — purchases now start as `pending`, bound to a checkout session's provider reference, amount, and currency.
+- `applyPaymentConfirmation` — the only path from `pending` to `paid` (or `failed`). Refuses confirmations whose session reference or amount/currency do not match the purchase.
+- `completeMockCheckout` — convenience: checkout -> pending purchase -> confirm -> apply.
+
+`simulatePaidPurchase` was removed; every purchase in the lifecycle script, tests, and web app now flows through the adapter. `runLifecycleDemo` step 7 is "checkout via mock payment adapter (paid event)" and aborts if payment does not confirm paid. License issuance was already gated on `status === "paid"`; the seam now exists for a Stripe adapter in its own package behind the same contract.
+
+Web checkout goes through the adapter and gains a "Simulate declined payment" button: a declined payment stores a `failed` purchase record and the UI states plainly that no license was issued, no unlock code exists, and no receipt was generated. Browser-verified end to end (declined then paid on the same listing; creator dashboard shows both purchases; no console errors).
+
+Tests (10 new in `packages/core/src/payments.test.ts`) cover the roadmap exit criteria directly: a mocked paid event yields a license that verifies (pass); a pending purchase cannot obtain a license; a failed payment yields no license and no unlock path; plus session binding, amount-tamper rejection, idempotency, and outcome-flip refusal.
+
+Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (89 tests), `pnpm demo`, `pnpm db:seed`, `pnpm db:verify <code>` all pass.
+
+Next expected action:
+
+- Stage 5 real QEV integration: `QevVaultV2EnvelopeAdapter` implementing `BRY-NFET-SX-VAULT-V2` semantics (Argon2id + XChaCha20-Poly1305 via libsodium) behind the existing `EnvelopeAdapter` contract, with the demo adapter retained for lifecycle tests. Alternatively, a thin API server over `@my-digital/store` first if moving the web app off localStorage takes priority.

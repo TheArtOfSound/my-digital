@@ -31,7 +31,7 @@ CREATE -> LOCK -> LIST -> BUY -> LICENSE -> UNLOCK -> VERIFY -> TRACE
 
 ## Repo status
 
-Roadmap Stages 0–3 complete. The full CREATE → LOCK → LIST → BUY → LICENSE → UNLOCK → VERIFY loop runs locally three ways: `pnpm demo` (script), `pnpm dev` (web app at `/sell`, `/listing/:id`, `/checkout/:id`, `/unlock`, `/verify`, `/creator`, state in browser localStorage), and `pnpm db:seed` + `pnpm db:verify` (SQLite persistence with committed migrations; records verify in a fresh process). Envelope locking uses a clearly labeled demo adapter; SHA-256 hashing and Ed25519 issuer signatures are real. Payments are mocked. Do not treat this repository as production software yet.
+Roadmap Stages 0–4 complete. The full CREATE → LOCK → LIST → BUY → LICENSE → UNLOCK → VERIFY loop runs locally three ways: `pnpm demo` (script), `pnpm dev` (web app at `/sell`, `/listing/:id`, `/checkout/:id`, `/unlock`, `/verify`, `/creator`, state in browser localStorage), and `pnpm db:seed` + `pnpm db:verify` (SQLite persistence with committed migrations; records verify in a fresh process). Envelope locking uses a clearly labeled demo adapter; SHA-256 hashing and Ed25519 issuer signatures are real. Payments flow through a `PaymentAdapter` boundary with a mock provider — purchases start pending and licenses exist only after a paid confirmation event. Do not treat this repository as production software yet.
 
 ## Ownership / license status
 

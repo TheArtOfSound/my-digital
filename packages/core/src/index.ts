@@ -6,6 +6,7 @@ export * from "./signing";
 export * from "./manifest";
 export * from "./entities";
 export * from "./licenses";
+export * from "./payments";
 export * from "./unlock-codes";
 export * from "./receipts";
 export * from "./lifecycle";

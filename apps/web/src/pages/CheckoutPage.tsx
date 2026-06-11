@@ -1,8 +1,8 @@
 import type { ListingId } from "@my-digital/types";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { copyToClipboard, downloadJson, formatPrice } from "../lib/format";
-import { useMarketplace, type PurchaseBundle } from "../lib/marketplace";
+import { useMarketplace, type CheckoutResult } from "../lib/marketplace";
 
 export function CheckoutPage() {
   const { listingId } = useParams<{ listingId: string }>();
@@ -11,8 +11,9 @@ export function CheckoutPage() {
   const [displayName, setDisplayName] = useState("Demo Buyer");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [bundle, setBundle] = useState<PurchaseBundle | null>(null);
+  const [result, setResult] = useState<CheckoutResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const outcomeRef = useRef<"paid" | "failed">("paid");
 
   const listing = state.listings.find((entry) => entry.id === listingId);
   if (!listing) {
@@ -31,20 +32,45 @@ export function CheckoutPage() {
     setBusy(true);
     setError(null);
     try {
-      const result = await actions.buyListing({
+      const checkoutResult = await actions.buyListing({
         listingId: listing!.id as ListingId,
         email,
-        ...(displayName.trim().length > 0 ? { displayName: displayName.trim() } : {})
+        ...(displayName.trim().length > 0 ? { displayName: displayName.trim() } : {}),
+        ...(outcomeRef.current === "failed" ? { simulateOutcome: "failed" as const } : {})
       });
-      setBundle(result);
+      setResult(checkoutResult);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
+      outcomeRef.current = "paid";
     }
   }
 
-  if (bundle) {
+  if (result && result.outcome === "failed") {
+    return (
+      <section className="panel panel-error-block">
+        <h2>Payment declined (simulated)</h2>
+        <p>
+          The mock provider reported a failed payment. Purchase{" "}
+          <span className="mono">{result.purchase.id}</span> was recorded with status{" "}
+          <strong>{result.purchase.status}</strong>. No license was issued, no unlock code
+          exists, and no receipt was generated.
+        </p>
+        <div className="hero-actions">
+          <button className="btn btn-primary" type="button" onClick={() => setResult(null)}>
+            Try again
+          </button>
+          <Link className="btn btn-ghost" to="/creator">
+            Creator dashboard
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (result) {
+    const bundle = result;
     return (
       <>
         <section className="panel panel-success">
@@ -126,8 +152,10 @@ export function CheckoutPage() {
         {listing.title} — {formatPrice(listing.priceAmount, listing.priceCurrency)}
       </p>
       <div className="notice">
-        The mock payment adapter records an instantly paid purchase. No card fields, no real
-        charge. A Stripe adapter arrives in a later stage behind the same interface.
+        Checkout goes through the payment adapter boundary: a checkout session is created, the
+        mock provider reports a paid or failed event, and a license exists only after a paid
+        confirmation. No card fields, no real charge. A Stripe adapter arrives later behind the
+        same interface.
       </div>
       <form className="form" onSubmit={onSubmit}>
         <label className="field">
@@ -144,11 +172,30 @@ export function CheckoutPage() {
           <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
         </label>
         {error && <p className="panel-error">{error}</p>}
-        <button className="btn btn-primary" disabled={busy} type="submit">
-          {busy
-            ? "Processing…"
-            : `Pay ${formatPrice(listing.priceAmount, listing.priceCurrency)} (mock)`}
-        </button>
+        <div className="hero-actions">
+          <button
+            className="btn btn-primary"
+            disabled={busy}
+            type="submit"
+            onClick={() => {
+              outcomeRef.current = "paid";
+            }}
+          >
+            {busy
+              ? "Processing…"
+              : `Pay ${formatPrice(listing.priceAmount, listing.priceCurrency)} (mock)`}
+          </button>
+          <button
+            className="btn btn-ghost"
+            disabled={busy}
+            type="submit"
+            onClick={() => {
+              outcomeRef.current = "failed";
+            }}
+          >
+            Simulate declined payment
+          </button>
+        </div>
       </form>
     </section>
   );

@@ -8,10 +8,10 @@ import {
   createCreator,
   createListing,
   createLockedAssetRecord,
-  demoPersonalLicenseTerms,
-  simulatePaidPurchase
+  demoPersonalLicenseTerms
 } from "./entities";
 import { issueBuyerLicense, verifyBuyerLicense } from "./licenses";
+import { MockPaymentAdapter, completeMockCheckout } from "./payments";
 import { generateIssuerSigningKeys } from "./signing";
 
 function checkCodes(checks: Array<{ code: string }>): string[] {
@@ -60,7 +60,7 @@ async function licenseFixture() {
     priceCurrency: "USD",
     licenseTerms: demoPersonalLicenseTerms
   });
-  const purchase = simulatePaidPurchase({ listing, buyer });
+  const { purchase } = await completeMockCheckout(new MockPaymentAdapter(), { listing, buyer });
   return { issuerKeys, creator, buyer, asset, assetVersion, lockedAsset, listing, purchase };
 }
 

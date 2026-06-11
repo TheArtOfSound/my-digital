@@ -2,6 +2,7 @@ import type {
   AssetId,
   AssetVersionId,
   BuyerId,
+  CheckoutSessionId,
   CreatorId,
   FingerprintId,
   LicenseId,
@@ -29,3 +30,5 @@ export const newUnlockCodeId = (): UnlockCodeId => prefixedId("unlock") as Unloc
 export const newProofReceiptId = (): ProofReceiptId => prefixedId("receipt") as ProofReceiptId;
 export const newFingerprintId = (): FingerprintId => prefixedId("fingerprint") as FingerprintId;
 export const newRevocationId = (): RevocationId => prefixedId("revocation") as RevocationId;
+export const newCheckoutSessionId = (): CheckoutSessionId =>
+  prefixedId("checkout") as CheckoutSessionId;

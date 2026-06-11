@@ -113,7 +113,7 @@ Exit criteria:
 
 ## Stage 4 — Payment abstraction
 
-Status: next.
+Status: complete (2026-06-11). `PaymentAdapter` contract in `@my-digital/types`; `MockPaymentAdapter` + pending-purchase/confirmation flow in `@my-digital/core`. Purchases start pending and become paid only via a confirmation event; tests prove unpaid/failed purchases cannot obtain licenses. Web checkout includes a declined-payment path. Stripe adapter still future, behind the same contract.
 
 Goal: payment-confirmed license issuance.
 
@@ -131,6 +131,8 @@ Exit criteria:
 - mocked paid event issues valid license
 
 ## Stage 5 — Real QEV integration
+
+Status: next.
 
 Goal: replace demo envelope behavior with QEV Vault V2 integration.
 
