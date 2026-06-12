@@ -1,11 +1,12 @@
 import {
-  completeMockCheckout,
+  applyPaymentConfirmation,
   createAsset,
   createAssetVersion,
   createBuyer,
   createCreator,
   createListing,
   createLockedAssetRecord,
+  createPendingPurchase,
   generateProofReceipt,
   hashEmail,
   issueBuyerLicense,
@@ -24,6 +25,7 @@ import type {
   Buyer,
   BuyerLicense,
   BuyerWrappingEnvelopeAdapter,
+  CheckoutSession,
   Creator,
   Fingerprint,
   LicenseId,
@@ -33,9 +35,11 @@ import type {
   LockedAsset,
   LockedAssetId,
   PaymentAdapter,
+  PaymentConfirmation,
   ProofReceipt,
   ProofReceiptId,
   Purchase,
+  PurchaseId,
   Revocation,
   TraceResult,
   UnlockCode,
@@ -225,21 +229,33 @@ export class MarketplaceService {
     return { asset, assetVersion, lockedAsset, listing };
   }
 
+  /** Single-call checkout used by the mock flow: begin + complete. */
   async checkout(input: {
     listingId: ListingId;
     email: string;
     displayName?: string;
     simulateOutcome?: "paid" | "failed";
   }): Promise<CheckoutOutcome> {
-    const { store, payments, envelope, keystore } = this.opts;
+    const begun = await this.beginCheckout({
+      listingId: input.listingId,
+      email: input.email,
+      ...(input.displayName !== undefined ? { displayName: input.displayName } : {})
+    });
+    return this.completeCheckout({
+      purchaseId: begun.purchase.id,
+      ...(input.simulateOutcome === "failed" ? { simulateOutcome: "failed" as const } : {})
+    });
+  }
+
+  /** Creates the pending purchase + provider session. Redirect flows start here. */
+  async beginCheckout(input: {
+    listingId: ListingId;
+    email: string;
+    displayName?: string;
+  }): Promise<{ purchase: Purchase; session: CheckoutSession }> {
+    const { store, payments } = this.opts;
     const listing = await store.getListing(input.listingId);
     if (!listing) throw new Error("Listing not found.");
-    const asset = await store.getAsset(listing.assetId);
-    const assetVersion = await store.getAssetVersion(listing.activeAssetVersionId);
-    const lockedAsset = await store.getLockedAssetByVersion(listing.activeAssetVersionId);
-    if (!asset || !assetVersion || !lockedAsset) {
-      throw new Error("Listing records are incomplete.");
-    }
 
     const emailHash = await hashEmail(input.email);
     let buyer = await store.getBuyerByEmailHash(emailHash);
@@ -252,18 +268,116 @@ export class MarketplaceService {
       await store.insertBuyer(buyer);
     }
 
-    const checkout = await completeMockCheckout(payments, {
-      listing,
-      buyer,
-      ...(input.simulateOutcome === "failed" ? { simulateOutcome: "failed" as const } : {})
-    });
-    await store.insertPurchase(checkout.purchase);
-    if (checkout.purchase.status !== "paid") {
-      return { outcome: "failed", buyer, purchase: checkout.purchase };
+    const session = await payments.createCheckout({ listing, buyer });
+    const purchase = createPendingPurchase({ listing, buyer, session });
+    await store.insertPurchase(purchase);
+    await store.insertCheckoutSession({ ...session, purchaseId: purchase.id });
+    return { purchase, session };
+  }
+
+  /**
+   * Confirms payment (poll path) and fulfills. Restart-safe: the persisted
+   * session is rehydrated into the adapter. If a webhook already marked the
+   * purchase paid, fulfillment proceeds without re-polling the provider.
+   */
+  async completeCheckout(input: {
+    purchaseId?: PurchaseId;
+    providerReference?: string;
+    simulateOutcome?: "paid" | "failed";
+  }): Promise<CheckoutOutcome> {
+    const { store, payments } = this.opts;
+    const purchase = input.purchaseId
+      ? await store.getPurchase(input.purchaseId)
+      : input.providerReference
+        ? await store.findPurchaseByProviderReference(input.providerReference)
+        : null;
+    if (!purchase) throw new Error("Purchase not found.");
+    const buyer = await store.getBuyer(purchase.buyerId);
+    if (!buyer) throw new Error("Buyer record is missing.");
+
+    if (purchase.status === "failed") return { outcome: "failed", buyer, purchase };
+    const alreadyFulfilled = (await store.listLicenses()).some(
+      (entry) => entry.purchaseId === purchase.id
+    );
+    if (alreadyFulfilled) {
+      throw new Error(
+        "This purchase is already fulfilled. The unlock code is shown exactly once and cannot be retrieved again."
+      );
+    }
+
+    let settled = purchase;
+    if (purchase.status === "pending") {
+      const sessionRow = await store.getCheckoutSessionByPurchase(purchase.id);
+      if (!sessionRow) throw new Error("No checkout session exists for this purchase.");
+      const { purchaseId: _purchaseId, ...session } = sessionRow;
+      payments.restoreSession?.(session);
+      const confirmation = await payments.confirmPayment({
+        sessionId: session.id,
+        ...(input.simulateOutcome === "failed" ? { simulateOutcome: "failed" as const } : {})
+      });
+      settled = applyPaymentConfirmation(purchase, confirmation);
+      await store.updatePurchaseStatus(settled.id, settled.status, settled.paidAt);
+      await store.updateCheckoutSessionStatus(
+        session.id,
+        confirmation.session.status,
+        confirmation.occurredAt
+      );
+      if (settled.status !== "paid") return { outcome: "failed", buyer, purchase: settled };
+    }
+    return this.fulfillPaidPurchase(settled, buyer);
+  }
+
+  /** Verifies a provider webhook and applies the confirmation to the purchase. */
+  async handlePaymentWebhook(
+    rawBody: string,
+    signature: string
+  ): Promise<{ handled: boolean; purchaseId?: PurchaseId; outcome?: "paid" | "failed" }> {
+    const { store } = this.opts;
+    const adapter = this.opts.payments as {
+      confirmFromWebhook?: (
+        rawBody: string,
+        signature: string
+      ) => Promise<PaymentConfirmation | null>;
+    };
+    if (!adapter.confirmFromWebhook) {
+      throw new Error("The active payment adapter does not support webhooks.");
+    }
+    const confirmation = await adapter.confirmFromWebhook(rawBody, signature);
+    if (!confirmation) return { handled: false };
+    const purchase = await store.findPurchaseByProviderReference(
+      confirmation.session.providerReference
+    );
+    if (!purchase) throw new Error("Webhook confirmation matches no purchase.");
+    if (purchase.status === "pending") {
+      const settled = applyPaymentConfirmation(purchase, confirmation);
+      await store.updatePurchaseStatus(settled.id, settled.status, settled.paidAt);
+      const sessionRow = await store.getCheckoutSessionByPurchase(purchase.id);
+      if (sessionRow) {
+        await store.updateCheckoutSessionStatus(
+          sessionRow.id,
+          confirmation.session.status,
+          confirmation.occurredAt
+        );
+      }
+    }
+    return { handled: true, purchaseId: purchase.id, outcome: confirmation.outcome };
+  }
+
+  /** Mints license, unlock code, buyer vault, receipt, and fingerprint. */
+  private async fulfillPaidPurchase(purchase: Purchase, buyer: Buyer): Promise<CheckoutOutcome> {
+    const { store, envelope, keystore } = this.opts;
+    const listing = await store.getListing(purchase.listingId);
+    const assetVersion = await store.getAssetVersion(purchase.assetVersionId);
+    const asset = assetVersion ? await store.getAsset(assetVersion.assetId) : null;
+    const lockedAsset = assetVersion
+      ? await store.getLockedAssetByVersion(assetVersion.id)
+      : null;
+    if (!listing || !asset || !assetVersion || !lockedAsset) {
+      throw new Error("Purchase records are incomplete.");
     }
 
     const license = await issueBuyerLicense({
-      purchase: checkout.purchase,
+      purchase,
       buyer,
       asset,
       assetVersion,
@@ -294,7 +408,7 @@ export class MarketplaceService {
     });
 
     const receipt = await generateProofReceipt({
-      purchase: checkout.purchase,
+      purchase,
       license,
       creatorId: asset.creatorId,
       issuerPrivateKey: this.issuer.privateKey,
@@ -325,7 +439,7 @@ export class MarketplaceService {
     return {
       outcome: "paid",
       buyer,
-      purchase: checkout.purchase,
+      purchase,
       license,
       receipt,
       rawUnlockCode: rawCode,

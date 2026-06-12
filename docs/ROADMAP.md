@@ -171,7 +171,7 @@ Exit criteria:
 
 ## Stage 7 — Creator marketplace beta
 
-Status: in progress. Server backbone done (2026-06-11): `apps/server` (Hono + SQLite store) locks with the real QEV adapter, seals custody and issuer secrets under a master key, mints buyer vaults at paid checkout, and serves the web app — which now runs against the API with local-first, in-browser unlock. Also done: buyer library (email-hash lookup, dev convenience), `@my-digital/payments-stripe` behind the payment contract (unit-tested; live validation pending per `docs/DEPLOYMENT.md`), receipt deep links at `/verify/:receiptId`, and the deployment plan for `mydigital.imagineqira.com`. Remaining for beta: real buyer auth, Stripe go-live (redirect/webhook flow with live keys), actual deployment, support/recovery docs.
+Status: in progress. Server backbone done (2026-06-11): `apps/server` (Hono + SQLite store) locks with the real QEV adapter, seals custody and issuer secrets under a master key, mints buyer vaults at paid checkout, and serves the web app — which now runs against the API with local-first, in-browser unlock. Also done: buyer library (email-hash lookup, dev convenience), `@my-digital/payments-stripe` behind the payment contract (unit-tested; live validation pending per `docs/DEPLOYMENT.md`), receipt deep links at `/verify/:receiptId`, and the deployment plan for `mydigital.imagineqira.com`. Remaining for beta: real buyer auth, Stripe test-key validation (the redirect/webhook flow is built and tested against a fake client; see `docs/DEPLOYMENT.md` §4), actual deployment. Support/recovery docs exist (`docs/SUPPORT.md`); admin reset is token-gated; the server serves the web build single-process.
 
 Goal: actual seller/buyer product.
 

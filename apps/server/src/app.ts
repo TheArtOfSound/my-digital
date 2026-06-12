@@ -5,10 +5,34 @@ import type {
   LicenseTerms,
   ListingId,
   LockedAssetId,
-  ProofReceiptId
+  ProofReceiptId,
+  PurchaseId
 } from "@my-digital/types";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { Hono } from "hono";
 import type { MarketplaceService } from "./service";
+
+export interface CreateAppOptions {
+  /** When set, POST /api/admin/reset requires `Authorization: Bearer <token>`. */
+  adminToken?: string;
+  /** When set, non-/api GETs serve this static directory with SPA fallback. */
+  staticRoot?: string;
+}
+
+const STATIC_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".map": "application/json",
+  ".wasm": "application/wasm",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8"
+};
 
 interface CreateListingBody {
   title: string;
@@ -29,7 +53,7 @@ interface CheckoutBody {
   simulateOutcome?: "paid" | "failed";
 }
 
-export function createApp(service: MarketplaceService): Hono {
+export function createApp(service: MarketplaceService, options: CreateAppOptions = {}): Hono {
   const app = new Hono();
 
   app.onError((error, c) => {
@@ -78,6 +102,34 @@ export function createApp(service: MarketplaceService): Hono {
       ...(body.simulateOutcome === "failed" ? { simulateOutcome: "failed" as const } : {})
     });
     return c.json(outcome, 201);
+  });
+
+  app.post("/api/checkout/begin", async (c) => {
+    const body = await c.req.json<{ listingId: string; email: string; displayName?: string }>();
+    const begun = await service.beginCheckout({
+      listingId: body.listingId as ListingId,
+      email: body.email,
+      ...(body.displayName !== undefined ? { displayName: body.displayName } : {})
+    });
+    return c.json(begun, 201);
+  });
+
+  app.post("/api/checkout/complete", async (c) => {
+    const body = await c.req.json<{ purchaseId?: string; providerReference?: string }>();
+    const outcome = await service.completeCheckout({
+      ...(body.purchaseId !== undefined ? { purchaseId: body.purchaseId as PurchaseId } : {}),
+      ...(body.providerReference !== undefined
+        ? { providerReference: body.providerReference }
+        : {})
+    });
+    return c.json(outcome, 201);
+  });
+
+  app.post("/api/webhooks/stripe", async (c) => {
+    const signature = c.req.header("stripe-signature");
+    if (!signature) return c.json({ error: "Missing stripe-signature header." }, 400);
+    const rawBody = await c.req.text();
+    return c.json(await service.handlePaymentWebhook(rawBody, signature));
   });
 
   app.get("/api/licenses/:id/vault", async (c) => {
@@ -139,9 +191,41 @@ export function createApp(service: MarketplaceService): Hono {
   });
 
   app.post("/api/admin/reset", async (c) => {
+    if (options.adminToken !== undefined) {
+      const header = c.req.header("authorization");
+      if (header !== `Bearer ${options.adminToken}`) {
+        return c.json({ error: "Admin token required." }, 401);
+      }
+    }
     await service.reset();
     return c.json({ ok: true });
   });
+
+  if (options.staticRoot !== undefined) {
+    const root = path.resolve(options.staticRoot);
+    app.get("*", async (c) => {
+      const requestPath = decodeURIComponent(new URL(c.req.url).pathname);
+      if (requestPath.startsWith("/api/")) return c.json({ error: "Not found." }, 404);
+      const candidate = path.resolve(path.join(root, requestPath));
+      // Traversal guard: never serve outside the static root.
+      const target =
+        candidate.startsWith(root + path.sep) || candidate === root
+          ? candidate
+          : path.join(root, "index.html");
+      try {
+        const filePath = target === root ? path.join(root, "index.html") : target;
+        const body = await readFile(filePath);
+        const type = STATIC_TYPES[path.extname(filePath)] ?? "application/octet-stream";
+        return c.body(new Uint8Array(body), 200, { "Content-Type": type });
+      } catch {
+        // SPA fallback: client-side routes (e.g. /verify/<receiptId>) get index.html.
+        const index = await readFile(path.join(root, "index.html"));
+        return c.body(new Uint8Array(index), 200, {
+          "Content-Type": "text/html; charset=utf-8"
+        });
+      }
+    });
+  }
 
   return app;
 }

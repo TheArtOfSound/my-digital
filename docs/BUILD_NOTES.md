@@ -257,3 +257,30 @@ Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` — 137 tests across 7 p
 Next expected action:
 
 - Stage 7 to beta per `docs/DEPLOYMENT.md`: pick a host, wire the Stripe redirect/webhook flow with live test keys, add real buyer auth, gate the admin reset, deploy to `mydigital.imagineqira.com`.
+
+## 2026-06-12 Stripe-ready checkout + deploy hardening pass
+
+Built everything on the Stripe go-live checklist that does not require keys, plus deploy/hardening items.
+
+Checkout is now a redirect-capable two-phase flow behind the same API:
+
+- `POST /api/checkout/begin`: pending purchase + provider session persisted (`checkout_sessions` table, migration 0002) with `checkoutUrl` for hosted providers.
+- `POST /api/checkout/complete` (by purchase id or provider reference): confirms via the adapter and fulfills (license, hash-only unlock code, buyer vault, receipt, fingerprint). Restart-safe: the persisted session is rehydrated via the new optional `PaymentAdapter.restoreSession` (implemented by mock and Stripe adapters; covered by a kill-and-resume test). Re-completing a fulfilled purchase is refused — the unlock code is shown exactly once, never retrievable.
+- `POST /api/webhooks/stripe`: verifies the signature and settles the purchase (paid/failed). Fulfillment still happens on `complete`, so the raw code goes straight to the buyer's browser and is never stored; webhook-driven fulfillment with sealed code delivery is deferred until buyer auth exists (an unauthenticated retrieval endpoint would hand codes to anyone).
+- `POST /api/checkout` (single-call) is unchanged for the mock flow; the web app needs no changes.
+- Service tests run the full Stripe flow against a fake client: begin -> webhook marks paid -> complete fulfills without re-polling; bad signatures rejected; mock adapter refuses webhooks with a clear error.
+
+Deploy/hardening:
+
+- Single-process mode: the server serves `apps/web/dist` when built (custom static handler: traversal-guarded, SPA fallback for `/verify/<receiptId>` deep links). Smoke-tested against the running server.
+- `POST /api/admin/reset` is token-gated via `MYDIGITAL_ADMIN_TOKEN` (401 verified live).
+- Payments selected by env: `MYDIGITAL_PAYMENTS=stripe` + `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`/`MYDIGITAL_PUBLIC_URL` constructs the real adapter at startup with an honest "not yet validated live" banner.
+- `docs/SUPPORT.md` added (Stage 7 requirement): lost-code/lost-vault/revocation/trace-interpretation/key-loss answers, each stating what is and is not possible by design.
+
+Key audit (2026-06-12): searched the dev machine for Stripe credentials — only LIVE keys belonging to unrelated ventures exist (ahcrap-shop, prideshop); no test keys anywhere. Decision: do NOT exercise another business's live account. The one unvalidated inch — real network calls against Stripe — needs a My Digital Stripe account's TEST keys (`sk_test_…`); everything up to that line is built and tested (149 tests; the full suite is now 149 across 7 packages).
+
+Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (149), `pnpm demo`, `pnpm db:seed`/`db:verify`, single-process static smoke, admin-gate smoke — all pass.
+
+Next expected action:
+
+- Obtain My Digital Stripe TEST keys -> run the step-4 test-mode purchase (add the small redirect UI: send buyer to `session.checkoutUrl`, call `complete` from `/checkout/done`). Pick a host + DNS for `mydigital.imagineqira.com`. Buyer auth remains the largest open beta item.

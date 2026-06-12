@@ -52,6 +52,9 @@ importers:
       '@my-digital/envelope':
         specifier: workspace:*
         version: link:../../packages/envelope
+      '@my-digital/payments-stripe':
+        specifier: workspace:*
+        version: link:../../packages/payments-stripe
       '@my-digital/store':
         specifier: workspace:*
         version: link:../../packages/store

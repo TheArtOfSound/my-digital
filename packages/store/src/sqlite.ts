@@ -7,6 +7,8 @@ import type {
   Buyer,
   BuyerId,
   BuyerLicense,
+  CheckoutSession,
+  CheckoutSessionId,
   Creator,
   CreatorId,
   Fingerprint,
@@ -30,7 +32,12 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { MarketplaceStore, SealedSecretRecord, StoredIssuerRecord } from "./interface";
+import type {
+  MarketplaceStore,
+  SealedSecretRecord,
+  StoredCheckoutSession,
+  StoredIssuerRecord
+} from "./interface";
 import * as schema from "./schema";
 
 const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
@@ -129,6 +136,25 @@ function rowToListing(row: ListingRow): Listing {
     status: row.status as Listing["status"],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
+  };
+}
+
+type CheckoutSessionRow = typeof schema.checkoutSessions.$inferSelect;
+
+function rowToCheckoutSession(row: CheckoutSessionRow): StoredCheckoutSession {
+  return {
+    id: row.id as CheckoutSessionId,
+    purchaseId: row.purchaseId as PurchaseId,
+    listingId: row.listingId as ListingId,
+    buyerId: row.buyerId as BuyerId,
+    amount: row.amount,
+    currency: row.currency,
+    status: row.status as CheckoutSession["status"],
+    provider: row.provider as CheckoutSession["provider"],
+    providerReference: row.providerReference,
+    createdAt: row.createdAt,
+    ...opt("checkoutUrl", row.checkoutUrl),
+    ...opt("completedAt", row.completedAt)
   };
 }
 
@@ -507,6 +533,67 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   async listPurchases(): Promise<Purchase[]> {
     return this.db.select().from(schema.purchases).all().map(rowToPurchase);
   }
+  async updatePurchaseStatus(
+    id: PurchaseId,
+    status: Purchase["status"],
+    paidAt?: string
+  ): Promise<void> {
+    this.db
+      .update(schema.purchases)
+      .set({ status, ...(paidAt !== undefined ? { paidAt } : {}) })
+      .where(eq(schema.purchases.id, id))
+      .run();
+  }
+  async findPurchaseByProviderReference(providerReference: string): Promise<Purchase | null> {
+    const row = this.db
+      .select()
+      .from(schema.purchases)
+      .where(eq(schema.purchases.paymentProviderReference, providerReference))
+      .get();
+    return row ? rowToPurchase(row) : null;
+  }
+
+  async insertCheckoutSession(session: StoredCheckoutSession): Promise<void> {
+    this.db
+      .insert(schema.checkoutSessions)
+      .values({
+        ...session,
+        checkoutUrl: session.checkoutUrl ?? null,
+        completedAt: session.completedAt ?? null
+      })
+      .run();
+  }
+  async getCheckoutSessionByPurchase(
+    purchaseId: PurchaseId
+  ): Promise<StoredCheckoutSession | null> {
+    const row = this.db
+      .select()
+      .from(schema.checkoutSessions)
+      .where(eq(schema.checkoutSessions.purchaseId, purchaseId))
+      .get();
+    return row ? rowToCheckoutSession(row) : null;
+  }
+  async getCheckoutSessionByProviderReference(
+    providerReference: string
+  ): Promise<StoredCheckoutSession | null> {
+    const row = this.db
+      .select()
+      .from(schema.checkoutSessions)
+      .where(eq(schema.checkoutSessions.providerReference, providerReference))
+      .get();
+    return row ? rowToCheckoutSession(row) : null;
+  }
+  async updateCheckoutSessionStatus(
+    id: CheckoutSessionId,
+    status: CheckoutSession["status"],
+    completedAt?: string
+  ): Promise<void> {
+    this.db
+      .update(schema.checkoutSessions)
+      .set({ status, ...(completedAt !== undefined ? { completedAt } : {}) })
+      .where(eq(schema.checkoutSessions.id, id))
+      .run();
+  }
 
   async insertLicense(license: BuyerLicense): Promise<void> {
     this.db
@@ -598,6 +685,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
 
   async reset(): Promise<void> {
     // Delete children before parents to respect foreign keys.
+    this.db.delete(schema.checkoutSessions).run();
     this.db.delete(schema.custodySecrets).run();
     this.db.delete(schema.issuerSecrets).run();
     this.db.delete(schema.buyerLockedPayloads).run();

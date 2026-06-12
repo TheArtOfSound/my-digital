@@ -41,6 +41,12 @@ export class MockPaymentAdapter implements PaymentAdapter {
     return session;
   }
 
+  restoreSession(session: CheckoutSession): void {
+    if (!this.sessions.has(session.id)) {
+      this.sessions.set(session.id, session);
+    }
+  }
+
   async confirmPayment(input: ConfirmPaymentInput): Promise<PaymentConfirmation> {
     const session = this.sessions.get(input.sessionId);
     if (!session) {

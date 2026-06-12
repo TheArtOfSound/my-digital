@@ -7,6 +7,8 @@ import type {
   Buyer,
   BuyerId,
   BuyerLicense,
+  CheckoutSession,
+  CheckoutSessionId,
   Creator,
   CreatorId,
   Fingerprint,
@@ -22,7 +24,12 @@ import type {
   Revocation,
   UnlockCode
 } from "@my-digital/types";
-import type { MarketplaceStore, SealedSecretRecord, StoredIssuerRecord } from "./interface";
+import type {
+  MarketplaceStore,
+  SealedSecretRecord,
+  StoredCheckoutSession,
+  StoredIssuerRecord
+} from "./interface";
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -34,6 +41,7 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   private custodySecrets = new Map<string, SealedSecretRecord>();
   private issuerSecrets = new Map<string, SealedSecretRecord>();
   private buyerLockedPayloads = new Map<string, { payload: Uint8Array; payloadHash: string }>();
+  private checkoutSessions = new Map<string, StoredCheckoutSession>();
   private creators = new Map<string, Creator>();
   private buyers = new Map<string, Buyer>();
   private assets = new Map<string, Asset>();
@@ -203,6 +211,60 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   async listPurchases(): Promise<Purchase[]> {
     return [...this.purchases.values()].map(clone);
   }
+  async updatePurchaseStatus(
+    id: PurchaseId,
+    status: Purchase["status"],
+    paidAt?: string
+  ): Promise<void> {
+    const found = this.purchases.get(id);
+    if (found) {
+      this.purchases.set(id, {
+        ...found,
+        status,
+        ...(paidAt !== undefined ? { paidAt } : {})
+      });
+    }
+  }
+  async findPurchaseByProviderReference(providerReference: string): Promise<Purchase | null> {
+    const found = [...this.purchases.values()].find(
+      (entry) => entry.paymentProviderReference === providerReference
+    );
+    return found ? clone(found) : null;
+  }
+
+  async insertCheckoutSession(session: StoredCheckoutSession): Promise<void> {
+    this.checkoutSessions.set(session.id, clone(session));
+  }
+  async getCheckoutSessionByPurchase(
+    purchaseId: PurchaseId
+  ): Promise<StoredCheckoutSession | null> {
+    const found = [...this.checkoutSessions.values()].find(
+      (entry) => entry.purchaseId === purchaseId
+    );
+    return found ? clone(found) : null;
+  }
+  async getCheckoutSessionByProviderReference(
+    providerReference: string
+  ): Promise<StoredCheckoutSession | null> {
+    const found = [...this.checkoutSessions.values()].find(
+      (entry) => entry.providerReference === providerReference
+    );
+    return found ? clone(found) : null;
+  }
+  async updateCheckoutSessionStatus(
+    id: CheckoutSessionId,
+    status: CheckoutSession["status"],
+    completedAt?: string
+  ): Promise<void> {
+    const found = this.checkoutSessions.get(id);
+    if (found) {
+      this.checkoutSessions.set(id, {
+        ...found,
+        status,
+        ...(completedAt !== undefined ? { completedAt } : {})
+      });
+    }
+  }
 
   async insertLicense(license: BuyerLicense): Promise<void> {
     this.licenses.set(license.id, clone(license));
@@ -256,6 +318,7 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   }
 
   async reset(): Promise<void> {
+    this.checkoutSessions.clear();
     this.custodySecrets.clear();
     this.issuerSecrets.clear();
     this.buyerLockedPayloads.clear();

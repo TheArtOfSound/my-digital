@@ -314,6 +314,12 @@ export interface PaymentConfirmation {
 export interface PaymentAdapter {
   createCheckout(input: CreateCheckoutInput): Promise<CheckoutSession>;
   confirmPayment(input: ConfirmPaymentInput): Promise<PaymentConfirmation>;
+  /**
+   * Rehydrate a session persisted by the caller (e.g. after a server
+   * restart) so confirmPayment can complete it. Optional: adapters with
+   * purely in-memory sessions implement it; callers feature-detect.
+   */
+  restoreSession?(session: CheckoutSession): void;
 }
 
 /**

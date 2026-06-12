@@ -7,6 +7,8 @@ import type {
   Buyer,
   BuyerId,
   BuyerLicense,
+  CheckoutSession,
+  CheckoutSessionId,
   Creator,
   CreatorId,
   Fingerprint,
@@ -43,6 +45,9 @@ export interface SealedSecretRecord {
   sealedB64: string;
   createdAt: string;
 }
+
+/** A checkout session persisted with the pending purchase it belongs to. */
+export type StoredCheckoutSession = CheckoutSession & { purchaseId: PurchaseId };
 
 export interface MarketplaceStore {
   putIssuer(issuer: StoredIssuerRecord): Promise<void>;
@@ -102,6 +107,19 @@ export interface MarketplaceStore {
   insertPurchase(purchase: Purchase): Promise<void>;
   getPurchase(id: PurchaseId): Promise<Purchase | null>;
   listPurchases(): Promise<Purchase[]>;
+  updatePurchaseStatus(id: PurchaseId, status: Purchase["status"], paidAt?: string): Promise<void>;
+  findPurchaseByProviderReference(providerReference: string): Promise<Purchase | null>;
+
+  insertCheckoutSession(session: StoredCheckoutSession): Promise<void>;
+  getCheckoutSessionByPurchase(purchaseId: PurchaseId): Promise<StoredCheckoutSession | null>;
+  getCheckoutSessionByProviderReference(
+    providerReference: string
+  ): Promise<StoredCheckoutSession | null>;
+  updateCheckoutSessionStatus(
+    id: CheckoutSessionId,
+    status: CheckoutSession["status"],
+    completedAt?: string
+  ): Promise<void>;
 
   insertLicense(license: BuyerLicense): Promise<void>;
   getLicense(id: LicenseId): Promise<BuyerLicense | null>;

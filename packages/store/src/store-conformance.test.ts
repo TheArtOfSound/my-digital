@@ -7,6 +7,7 @@ import type {
   Buyer,
   BuyerId,
   BuyerLicense,
+  CheckoutSessionId,
   Creator,
   CreatorId,
   Fingerprint,
@@ -298,6 +299,40 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
     it("round-trips purchases", async () => {
       await store.insertPurchase(purchase);
       expect(await store.getPurchase(purchase.id)).toEqual(purchase);
+      expect(await store.findPurchaseByProviderReference("mockpay_conf")).toEqual(purchase);
+      expect(await store.findPurchaseByProviderReference("missing")).toBeNull();
+    });
+
+    it("updates purchase status with paidAt", async () => {
+      await store.updatePurchaseStatus(purchase.id, "refunded");
+      expect((await store.getPurchase(purchase.id))?.status).toBe("refunded");
+      await store.updatePurchaseStatus(purchase.id, "paid", "2026-06-12T00:00:00.000Z");
+      const updated = await store.getPurchase(purchase.id);
+      expect(updated?.status).toBe("paid");
+      expect(updated?.paidAt).toBe("2026-06-12T00:00:00.000Z");
+    });
+
+    it("round-trips checkout sessions and updates their status", async () => {
+      const session = {
+        id: "checkout_conf" as CheckoutSessionId,
+        purchaseId: purchase.id,
+        listingId: listing.id,
+        buyerId: buyer.id,
+        amount: 1900,
+        currency: "USD",
+        status: "open" as const,
+        provider: "mock" as const,
+        providerReference: "mockpay_conf",
+        createdAt: NOW
+      };
+      await store.insertCheckoutSession(session);
+      expect(await store.getCheckoutSessionByPurchase(purchase.id)).toEqual(session);
+      expect(await store.getCheckoutSessionByProviderReference("mockpay_conf")).toEqual(session);
+      expect(await store.getCheckoutSessionByPurchase("purchase_missing" as PurchaseId)).toBeNull();
+      await store.updateCheckoutSessionStatus(session.id, "paid", "2026-06-12T01:00:00.000Z");
+      const updated = await store.getCheckoutSessionByPurchase(purchase.id);
+      expect(updated?.status).toBe("paid");
+      expect(updated?.completedAt).toBe("2026-06-12T01:00:00.000Z");
     });
 
     it("round-trips licenses including optional fields", async () => {
@@ -373,6 +408,7 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.getCustodySecret(lockedAsset.id)).toBeNull();
       expect(await store.getIssuerSecret("test-issuer")).toBeNull();
       expect(await store.getBuyerLockedPayload(license.id)).toBeNull();
+      expect(await store.getCheckoutSessionByPurchase(purchase.id)).toBeNull();
     });
   });
 }

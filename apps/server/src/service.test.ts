@@ -1,8 +1,13 @@
 import { MockPaymentAdapter, demoPersonalLicenseTerms, sha256Hex, utf8Bytes } from "@my-digital/core";
 import { QevVaultV2EnvelopeAdapter } from "@my-digital/envelope";
+import {
+  StripePaymentAdapter,
+  type StripeLikeClient,
+  type StripeLikeEvent
+} from "@my-digital/payments-stripe";
 import { MemoryMarketplaceStore, openSqliteStore, type MarketplaceStore } from "@my-digital/store";
 import type { LicenseId, ListingId } from "@my-digital/types";
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -262,6 +267,172 @@ describe("MarketplaceService buyer library", () => {
   });
 });
 
+describe("begin/complete checkout (redirect-style flow)", () => {
+  it("begin persists a pending purchase and session; complete confirms and fulfills", async () => {
+    const { service, store } = await makeService();
+    const { listing } = await seedListing(service);
+    const begun = await service.beginCheckout({
+      listingId: listing.id,
+      email: "redirect-buyer@example.com"
+    });
+    expect(begun.purchase.status).toBe("pending");
+    expect((await store.getCheckoutSessionByPurchase(begun.purchase.id))?.status).toBe("open");
+    expect(await store.listLicenses()).toHaveLength(0);
+
+    const outcome = await service.completeCheckout({ purchaseId: begun.purchase.id });
+    if (outcome.outcome !== "paid") throw new Error("expected paid");
+    expect(outcome.rawUnlockCode).toMatch(/^UNLK-/);
+    expect((await store.getPurchase(begun.purchase.id))?.status).toBe("paid");
+    expect((await store.getCheckoutSessionByPurchase(begun.purchase.id))?.status).toBe("paid");
+
+    await expect(service.completeCheckout({ purchaseId: begun.purchase.id })).rejects.toThrow(
+      /already fulfilled/
+    );
+  });
+
+  it("completes by provider reference and supports the declined path", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    const begun = await service.beginCheckout({
+      listingId: listing.id,
+      email: "declined@example.com"
+    });
+    const outcome = await service.completeCheckout({
+      providerReference: begun.session.providerReference,
+      simulateOutcome: "failed"
+    });
+    expect(outcome.outcome).toBe("failed");
+    expect(outcome.purchase.status).toBe("failed");
+  });
+
+  it("survives a service restart between begin and complete", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "mydigital-resume-"));
+    const dbPath = path.join(dir, "resume.sqlite");
+    const keyFilePath = path.join(dir, "master-key.b64");
+    const makeOn = async () => {
+      const store = openSqliteStore({ path: dbPath });
+      const keystore = await Keystore.open({ keyFilePath });
+      const service = await MarketplaceService.create({
+        store,
+        keystore,
+        envelope: new QevVaultV2EnvelopeAdapter({ preset: "quick" }),
+        payments: new MockPaymentAdapter(),
+        issuerName: "resume-issuer",
+        verificationUrlBase: "https://mydigital.imagineqira.com/verify"
+      });
+      return { store, service };
+    };
+
+    const first = await makeOn();
+    const { listing } = await seedListing(first.service);
+    const begun = await first.service.beginCheckout({
+      listingId: listing.id as ListingId,
+      email: "resume@example.com"
+    });
+    await first.store.close();
+
+    // Fresh process: adapter session map is empty; the persisted session row
+    // is rehydrated via restoreSession before confirmation.
+    const second = await makeOn();
+    const outcome = await second.service.completeCheckout({ purchaseId: begun.purchase.id });
+    expect(outcome.outcome).toBe("paid");
+    await second.store.close();
+  });
+});
+
+describe("Stripe-adapter service flow (fake client)", () => {
+  async function makeStripeService() {
+    const stripeSession = {
+      id: "cs_live_flow",
+      url: "https://checkout.stripe.com/c/pay/cs_live_flow",
+      status: "open",
+      payment_status: "unpaid",
+      amount_total: 1900,
+      currency: "usd",
+      metadata: {} as Record<string, string>
+    };
+    const client: StripeLikeClient = {
+      checkout: {
+        sessions: {
+          async create(params) {
+            stripeSession.metadata = (params as { metadata: Record<string, string> }).metadata;
+            return stripeSession;
+          },
+          async retrieve() {
+            return stripeSession;
+          }
+        }
+      },
+      webhooks: {
+        async constructEventAsync(payload, header) {
+          if (header !== "valid-signature") throw new Error("signature verification failed");
+          return JSON.parse(payload) as StripeLikeEvent;
+        }
+      }
+    };
+    const adapter = new StripePaymentAdapter({
+      client,
+      successUrl: "https://example.com/done",
+      cancelUrl: "https://example.com/",
+      webhookSecret: "whsec_test"
+    });
+    const store = new MemoryMarketplaceStore();
+    const keystore = await Keystore.ephemeral();
+    const service = await MarketplaceService.create({
+      store,
+      keystore,
+      envelope: new QevVaultV2EnvelopeAdapter({ preset: "quick" }),
+      payments: adapter,
+      issuerName: "stripe-test-issuer",
+      verificationUrlBase: "https://mydigital.imagineqira.com/verify"
+    });
+    return { service, store, stripeSession };
+  }
+
+  it("webhook marks the purchase paid; complete fulfills without re-polling", async () => {
+    const { service, store, stripeSession } = await makeStripeService();
+    const { listing } = await seedListing(service);
+    const begun = await service.beginCheckout({
+      listingId: listing.id,
+      email: "stripe-buyer@example.com"
+    });
+    expect(begun.session.checkoutUrl).toContain("checkout.stripe.com");
+    expect(begun.purchase.status).toBe("pending");
+
+    const event = {
+      id: "evt_flow_1",
+      type: "checkout.session.completed",
+      data: {
+        object: { ...stripeSession, status: "complete", payment_status: "paid" }
+      }
+    };
+    const webhook = await service.handlePaymentWebhook(JSON.stringify(event), "valid-signature");
+    expect(webhook.handled).toBe(true);
+    expect(webhook.outcome).toBe("paid");
+    expect((await store.getPurchase(begun.purchase.id))?.status).toBe("paid");
+    expect(await store.listLicenses()).toHaveLength(0);
+
+    const outcome = await service.completeCheckout({ purchaseId: begun.purchase.id });
+    if (outcome.outcome !== "paid") throw new Error("expected paid");
+    expect(outcome.rawUnlockCode).toMatch(/^UNLK-/);
+    expect(await service.getBuyerVault(outcome.license.id)).not.toBeNull();
+  });
+
+  it("rejects webhooks with bad signatures", async () => {
+    const { service } = await makeStripeService();
+    await expect(service.handlePaymentWebhook("{}", "bad-signature")).rejects.toThrow(
+      /signature/
+    );
+  });
+
+  it("mock adapter refuses webhook handling with a clear error", async () => {
+    const { service } = await makeService();
+    await expect(service.handlePaymentWebhook("{}", "sig")).rejects.toThrow(
+      /does not support webhooks/
+    );
+  });
+});
+
 describe("issuer persistence across restarts", () => {
   it("a second service instance on the same database keeps the issuer and old licenses verify", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "mydigital-server-"));
@@ -370,5 +541,43 @@ describe("HTTP app", () => {
     });
     expect(bad.status).toBe(400);
     expect(((await bad.json()) as { error: string }).error).toContain("Listing not found");
+  });
+
+  it("gates the admin reset behind a bearer token when configured", async () => {
+    const { service } = await makeService();
+    const app = createApp(service, { adminToken: "secret-token" });
+    const denied = await app.request("/api/admin/reset", { method: "POST" });
+    expect(denied.status).toBe(401);
+    const allowed = await app.request("/api/admin/reset", {
+      method: "POST",
+      headers: { Authorization: "Bearer secret-token" }
+    });
+    expect(allowed.status).toBe(200);
+  });
+
+  it("serves the static web build with SPA fallback when configured", async () => {
+    const { service } = await makeService();
+    const staticRoot = mkdtempSync(path.join(tmpdir(), "mydigital-static-"));
+    writeFileSync(path.join(staticRoot, "index.html"), "<!doctype html><title>md</title>");
+    writeFileSync(path.join(staticRoot, "app.js"), "console.log(1)");
+    const app = createApp(service, { staticRoot });
+
+    const index = await app.request("/");
+    expect(index.status).toBe(200);
+    expect(index.headers.get("content-type")).toContain("text/html");
+
+    const asset = await app.request("/app.js");
+    expect(asset.headers.get("content-type")).toContain("text/javascript");
+
+    // Client-side routes fall back to index.html (receipt deep links).
+    const deepLink = await app.request("/verify/receipt_x");
+    expect(await deepLink.text()).toContain("<title>md</title>");
+
+    // Path traversal stays inside the root.
+    const traversal = await app.request("/../service.ts");
+    expect(await traversal.text()).toContain("<title>md</title>");
+
+    const api = await app.request("/api/health");
+    expect(((await api.json()) as { ok: boolean }).ok).toBe(true);
   });
 });

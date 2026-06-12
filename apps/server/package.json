@@ -15,6 +15,7 @@
     "@hono/node-server": "^1.13.8",
     "@my-digital/core": "workspace:*",
     "@my-digital/envelope": "workspace:*",
+    "@my-digital/payments-stripe": "workspace:*",
     "@my-digital/store": "workspace:*",
     "@my-digital/types": "workspace:*",
     "hono": "^4.6.20",

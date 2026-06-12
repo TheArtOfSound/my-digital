@@ -192,6 +192,27 @@ export const fingerprints = sqliteTable("fingerprints", {
   createdAt: text("created_at").notNull()
 });
 
+export const checkoutSessions = sqliteTable("checkout_sessions", {
+  id: text("id").primaryKey(),
+  purchaseId: text("purchase_id")
+    .notNull()
+    .references(() => purchases.id),
+  listingId: text("listing_id")
+    .notNull()
+    .references(() => listings.id),
+  buyerId: text("buyer_id")
+    .notNull()
+    .references(() => buyers.id),
+  amount: integer("amount").notNull(),
+  currency: text("currency").notNull(),
+  status: text("status").notNull(),
+  provider: text("provider").notNull(),
+  providerReference: text("provider_reference").notNull(),
+  checkoutUrl: text("checkout_url"),
+  createdAt: text("created_at").notNull(),
+  completedAt: text("completed_at")
+});
+
 export const custodySecrets = sqliteTable("custody_secrets", {
   lockedAssetId: text("locked_asset_id")
     .primaryKey()

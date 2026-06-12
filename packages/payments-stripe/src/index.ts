@@ -118,6 +118,13 @@ export class StripePaymentAdapter implements PaymentAdapter {
     return session;
   }
 
+  restoreSession(session: CheckoutSession): void {
+    if (!this.sessions.has(session.id)) {
+      this.sessions.set(session.id, session);
+      this.byProviderReference.set(session.providerReference, session.id);
+    }
+  }
+
   async confirmPayment(input: ConfirmPaymentInput): Promise<PaymentConfirmation> {
     if (input.simulateOutcome !== undefined) {
       throw new Error("simulateOutcome is a mock-only control; the Stripe adapter rejects it.");
