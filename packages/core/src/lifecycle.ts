@@ -4,6 +4,7 @@ import type {
   AssetVersion,
   Buyer,
   BuyerLicense,
+  BuyerWrappingEnvelopeAdapter,
   Creator,
   EnvelopeAdapter,
   LicenseTerms,
@@ -30,6 +31,14 @@ import { MockPaymentAdapter, completeMockCheckout } from "./payments";
 import { generateProofReceipt, verifyProofReceipt } from "./receipts";
 import { generateIssuerSigningKeys } from "./signing";
 import { issueUnlockCode, redeemUnlockCode, verifyUnlockCode } from "./unlock-codes";
+
+export function isBuyerWrappingEnvelopeAdapter(
+  adapter: EnvelopeAdapter
+): adapter is BuyerWrappingEnvelopeAdapter {
+  return (
+    typeof (adapter as Partial<BuyerWrappingEnvelopeAdapter>).wrapForCredential === "function"
+  );
+}
 
 export interface LifecycleStep {
   step: number;
@@ -63,6 +72,8 @@ export interface LifecycleDemoResult {
   manifest: AssetManifest;
   lockedAsset: LockedAsset;
   lockedPayload: Uint8Array;
+  /** Present when the adapter supports buyer wrapping: the buyer-specific vault. */
+  buyerLockedPayload?: Uint8Array;
   listing: Listing;
   purchase: Purchase;
   license: BuyerLicense;
@@ -84,15 +95,17 @@ export interface LifecycleDemoResult {
 /**
  * Runs the full CREATE -> LOCK -> LIST -> BUY -> LICENSE -> UNLOCK -> VERIFY
  * -> TRACE-precursor loop locally against the supplied envelope adapter.
- * With the demo adapter this proves lifecycle wiring, not production security.
+ * With the demo adapter this proves lifecycle wiring only; with a buyer-
+ * wrapping adapter (QEV Vault V2) lock/wrap/unlock are real cryptography,
+ * while payments remain mocked and custody stays in process memory.
  */
 export async function runLifecycleDemo(
   adapter: EnvelopeAdapter,
   options: LifecycleDemoOptions = {}
 ): Promise<LifecycleDemoResult> {
   const steps: LifecycleStep[] = [];
-  const note = (step: number, label: string, ok: boolean, detail: string): void => {
-    steps.push({ step, label, ok, detail });
+  const note = (label: string, ok: boolean, detail: string): void => {
+    steps.push({ step: steps.length + 1, label, ok, detail });
   };
 
   const issuerName = options.issuerName ?? "my-digital-demo-issuer";
@@ -105,12 +118,12 @@ export async function runLifecycleDemo(
       email: "creator@example.com"
     }
   );
-  note(1, "create creator", true, creator.id);
+  note("create creator", true, creator.id);
 
   const buyer = await createBuyer(
     options.buyer ?? { email: "buyer@example.com", displayName: "Demo Buyer" }
   );
-  note(2, "create buyer", true, buyer.id);
+  note("create buyer", true, buyer.id);
 
   const payload =
     options.payload ??
@@ -128,7 +141,7 @@ export async function runLifecycleDemo(
       category: "demo"
     })
   });
-  note(3, "create asset bytes", true, `${asset.id} (${payload.byteLength} bytes)`);
+  note("create asset bytes", true, `${asset.id} (${payload.byteLength} bytes)`);
 
   const { assetVersion, manifest } = await createAssetVersion({
     asset,
@@ -137,7 +150,11 @@ export async function runLifecycleDemo(
     mimeType: options.mimeType ?? "text/plain",
     bytes: payload
   });
-  note(4, "create asset manifest", true, `${assetVersion.id} manifestHash=${assetVersion.manifestHash.slice(0, 16)}…`);
+  note(
+    "create asset manifest",
+    true,
+    `${assetVersion.id} manifestHash=${assetVersion.manifestHash.slice(0, 16)}…`
+  );
 
   const lockResult = await adapter.lock({
     assetVersionId: assetVersion.id,
@@ -151,10 +168,11 @@ export async function runLifecycleDemo(
   });
   asset = { ...asset, status: "locked" };
   note(
-    5,
     "lock asset via envelope adapter",
     true,
-    `${lockedAsset.id} format=${lockedAsset.envelopeFormat}${lockResult.developmentOnly ? " [DEMO ONLY]" : ""}`
+    `${lockedAsset.id} format=${lockedAsset.envelopeFormat}${
+      lockResult.developmentOnly ? " [DEMO ONLY]" : " [production envelope]"
+    }`
   );
 
   const listing = createListing({
@@ -165,12 +183,11 @@ export async function runLifecycleDemo(
     licenseTerms: options.licenseTerms ?? demoPersonalLicenseTerms
   });
   asset = { ...asset, status: "listed" };
-  note(6, "create listing", true, `${listing.id} ${listing.priceAmount} ${listing.priceCurrency}`);
+  note("create listing", true, `${listing.id} ${listing.priceAmount} ${listing.priceCurrency}`);
 
   const checkout = await completeMockCheckout(new MockPaymentAdapter(), { listing, buyer });
   const purchase = checkout.purchase;
   note(
-    7,
     "checkout via mock payment adapter (paid event)",
     purchase.status === "paid",
     `${purchase.id} session=${checkout.session.id} status=${purchase.status}`
@@ -189,10 +206,37 @@ export async function runLifecycleDemo(
     issuer: issuerName,
     issuerPrivateKey: issuerKeys.privateKey
   });
-  note(8, "issue buyer-specific license", true, license.id);
+  note("issue buyer-specific license", true, license.id);
 
   const { unlockCode: issuedCode, rawCode } = await issueUnlockCode({ licenseId: license.id });
-  note(9, "issue unlock code", true, `${issuedCode.id} (raw code withheld from records; only its hash is stored)`);
+  note(
+    "issue unlock code",
+    true,
+    `${issuedCode.id} (raw code withheld from records; only its hash is stored)`
+  );
+
+  let unlockPayload = lockResult.lockedPayload;
+  let buyerLockedPayload: Uint8Array | undefined;
+  if (isBuyerWrappingEnvelopeAdapter(adapter)) {
+    if (lockResult.keyMaterialB64 === undefined) {
+      throw new Error(
+        "Lifecycle demo aborted: wrapping adapter returned no custody key material."
+      );
+    }
+    const wrap = await adapter.wrapForCredential({
+      lockedPayload: lockResult.lockedPayload,
+      keyMaterialB64: lockResult.keyMaterialB64,
+      credential: rawCode,
+      licenseId: license.id
+    });
+    buyerLockedPayload = wrap.buyerLockedPayload;
+    unlockPayload = wrap.buyerLockedPayload;
+    note(
+      "mint buyer-specific vault (wrap for credential)",
+      true,
+      `${wrap.buyerLockedPayload.byteLength} bytes, hash=${wrap.buyerLockedPayloadHash.slice(0, 16)}…`
+    );
+  }
 
   const licenseVerification = await verifyBuyerLicense({
     license,
@@ -213,7 +257,6 @@ export async function runLifecycleDemo(
     actualMetadataHash: lockResult.metadataHash
   });
   note(
-    10,
     "verify license, unlock code, and envelope against asset records",
     licenseVerification.status !== "fail" &&
       codeVerification.status !== "fail" &&
@@ -231,13 +274,12 @@ export async function runLifecycleDemo(
 
   const unlockCode = redeemUnlockCode(issuedCode);
   const unlockResult = await adapter.unlock({
-    lockedPayload: lockResult.lockedPayload,
+    lockedPayload: unlockPayload,
     licenseMaterial: rawCode
   });
   const payloadMatches = bytesEqual(unlockResult.plaintext, payload);
   note(
-    11,
-    "unlock demo payload",
+    "unlock payload with unlock code",
     unlockResult.verification.status !== "fail" && payloadMatches,
     payloadMatches
       ? `unlocked ${unlockResult.plaintext.byteLength} bytes; matches original payload`
@@ -258,7 +300,6 @@ export async function runLifecycleDemo(
     expected: { purchaseId: purchase.id, licenseId: license.id }
   });
   note(
-    12,
     "generate and verify proof receipt",
     receiptVerification.status === "pass",
     `${receipt.id} verification=${receiptVerification.status}`
@@ -272,7 +313,6 @@ export async function runLifecycleDemo(
     actualLockedPayloadHash: await sha256Hex(tamperedPayload)
   });
   note(
-    13,
     "tamper with locked payload and re-verify (failure expected)",
     tamperedVerification.status === "fail",
     `tampered envelope verification=${tamperedVerification.status}`
@@ -288,6 +328,7 @@ export async function runLifecycleDemo(
     manifest,
     lockedAsset,
     lockedPayload: lockResult.lockedPayload,
+    ...(buyerLockedPayload !== undefined ? { buyerLockedPayload } : {}),
     listing,
     purchase,
     license,

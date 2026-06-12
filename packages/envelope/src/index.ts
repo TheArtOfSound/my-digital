@@ -2,7 +2,6 @@ import {
   base64ToBytes,
   bytesToBase64,
   createVerificationResult,
-  inferVerificationStatus,
   newLockedAssetId,
   sha256Hex
 } from "@my-digital/core";
@@ -16,15 +15,26 @@ import type {
   VerificationCheck,
   VerificationResult
 } from "@my-digital/types";
+import { compareRecordedHashes } from "./hash-comparison";
 
 export type {
+  BuyerWrappingEnvelopeAdapter,
   EnvelopeAdapter,
   EnvelopeLockInput,
   EnvelopeLockResult,
   EnvelopeUnlockInput,
   EnvelopeUnlockResult,
-  EnvelopeVerifyInput
+  EnvelopeVerifyInput,
+  WrapForCredentialInput,
+  WrapForCredentialResult
 } from "@my-digital/types";
+export {
+  QEV_KDF_PRESETS,
+  QEV_VAULT_SCHEMA,
+  QevVaultV2EnvelopeAdapter,
+  type QevKdfPreset,
+  type QevVaultV2EnvelopeAdapterOptions
+} from "./qev-vault-v2";
 
 const DEMO_WARNING = "DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING";
 
@@ -125,55 +135,9 @@ export class DemoEnvelopeAdapter implements EnvelopeAdapter {
   }
 
   async verify(input: EnvelopeVerifyInput): Promise<VerificationResult> {
-    const checksFailed: VerificationCheck[] = [];
-    const checksPassed: VerificationCheck[] = [];
-
-    if (input.expectedLockedPayloadHash === input.actualLockedPayloadHash) {
-      checksPassed.push({
-        code: "LOCKED_PAYLOAD_HASH_MATCH",
-        label: "Locked payload hash matches",
-        detail: "The provided locked payload hash matches the expected hash."
-      });
-    } else {
-      checksFailed.push({
-        code: "LOCKED_PAYLOAD_HASH_MISMATCH",
-        label: "Locked payload hash mismatch",
-        detail: "The provided locked payload hash does not match the expected hash."
-      });
-    }
-
-    if (input.expectedMetadataHash && input.actualMetadataHash) {
-      if (input.expectedMetadataHash === input.actualMetadataHash) {
-        checksPassed.push({
-          code: "METADATA_HASH_MATCH",
-          label: "Metadata hash matches",
-          detail: "The provided metadata hash matches the expected hash."
-        });
-      } else {
-        checksFailed.push({
-          code: "METADATA_HASH_MISMATCH",
-          label: "Metadata hash mismatch",
-          detail: "The provided metadata hash does not match the expected hash."
-        });
-      }
-    }
-
-    return createVerificationResult({
-      subjectType: "locked-asset",
-      subjectId: input.lockedAssetId,
-      status: inferVerificationStatus({ failedCount: checksFailed.length, warningCount: 1 }),
-      checksPassed,
-      checksFailed,
-      warnings: [
-        {
-          code: "DEMO_ONLY",
-          label: "Demo-only envelope verification",
-          detail:
-            "This verifies lifecycle hashes only. It is not production QEV cryptographic verification."
-        }
-      ],
-      assumptions: ["Expected hashes come from trusted marketplace records."],
-      artifacts: [input.lockedAssetId]
+    return compareRecordedHashes(input, {
+      demoOnly: true,
+      assumptions: ["Expected hashes come from trusted marketplace records."]
     });
   }
 

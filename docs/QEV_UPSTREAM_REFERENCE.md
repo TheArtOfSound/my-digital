@@ -123,22 +123,20 @@ DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING
 
 Fable 5 must not remove this label until real QEV integration exists.
 
-## 9. Future production adapter
+## 9. Production adapter (implemented 2026-06-11)
 
-Future production adapter should be named something like:
+`QevVaultV2EnvelopeAdapter` lives in `@my-digital/envelope` (`src/qev-vault-v2.ts`). It:
 
-```text
-QevVaultV2EnvelopeAdapter
-```
+- creates `BRY-NFET-SX-VAULT-V2` envelopes byte-compatible with upstream (field names, base64url without padding, the exact buildAADV2 associated-data subset, mode whitelist `self`/`share`, KDF caps, strength presets)
+- locks asset bytes under a custody vault (mode `self`) and mints buyer-specific vaults (mode `share`) from the buyer's unlock code via `wrapForCredential`
+- seals commerce binding (asset version, file name, mime type, content SHA-256, license id) inside the authenticated plaintext (`MYDIGITAL-LOCKED-ASSET-V1` wrapper) so the vault stays upstream-format while the binding is tamper-evident
+- unlocks with the buyer credential, with distinct structured failures for wrong credential/tampered metadata (`VAULT_WRAP_AUTH_FAILED`) and tampered ciphertext (`VAULT_CONTENT_AUTH_FAILED`)
+- verifies schema/version/mode/KDF/wrap/content structure via `verifyVaultStructure`
+- returns structured `VerificationResult`s everywhere
 
-Expected responsibilities:
+Cross-implementation compatibility is tested against the published `@bryan237l/qev-cli` in both directions. Upstream constraints to remember: the CLI requires UTF-8 plaintext (text assets are directly CLI-openable; binary assets unlock via My Digital tooling) and caps ciphertext at 1 MiB.
 
-- create `BRY-NFET-SX-VAULT-V2` envelope
-- lock asset bytes
-- bind asset manifest/license metadata as AAD where appropriate
-- unlock with valid credential/passphrase/license material
-- verify schema/version/mode/KDF/wrap/content integrity
-- return structured `VerificationResult`
+Custody caveat: `lock()` returns the custody passphrase as `keyMaterialB64`; the caller must treat it as a secret. It is never persisted by current code. Server-side key custody is future work, which is why the web app and the SQLite demo database intentionally stay on the demo adapter for now.
 
 ## 10. Do not over-merge products
 

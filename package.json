@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "pnpm --filter @my-digital/web dev",
     "demo": "pnpm --filter @my-digital/lifecycle-demo demo",
+    "demo:qev": "pnpm --filter @my-digital/lifecycle-demo demo:qev",
     "db:seed": "pnpm --filter @my-digital/lifecycle-demo seed",
     "db:verify": "pnpm --filter @my-digital/lifecycle-demo verify-db",
     "build": "pnpm -r build",
@@ -21,5 +22,10 @@
     "licenses",
     "marketplace"
   ],
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "pnpm": {
+    "patchedDependencies": {
+      "libsodium-wrappers-sumo@0.7.16": "patches/libsodium-wrappers-sumo@0.7.16.patch"
+    }
+  }
 }

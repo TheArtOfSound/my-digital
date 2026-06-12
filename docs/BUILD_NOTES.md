@@ -177,3 +177,25 @@ Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (89 tests), `pnpm demo`,
 Next expected action:
 
 - Stage 5 real QEV integration: `QevVaultV2EnvelopeAdapter` implementing `BRY-NFET-SX-VAULT-V2` semantics (Argon2id + XChaCha20-Poly1305 via libsodium) behind the existing `EnvelopeAdapter` contract, with the demo adapter retained for lifecycle tests. Alternatively, a thin API server over `@my-digital/store` first if moving the web app off localStorage takes priority.
+
+## 2026-06-11 Stage 5 real QEV integration pass
+
+Added `QevVaultV2EnvelopeAdapter` (`packages/envelope/src/qev-vault-v2.ts`), the production envelope adapter. The demo adapter is retained unchanged for lifecycle tests; both share the recorded-hash comparison helper (`hash-comparison.ts`), with the demo warning only on the demo adapter.
+
+Fidelity to upstream. The upstream repo (`TheArtOfSound/qev-desktop`) was cloned and the adapter was written against `docs/VAULT_FORMAT.md` and `qev-cli/lib/vault.js` directly: exact field names (`kdf.opslimit`/`memlimit`/`salt`, `wrap.nonce`/`wrapped_key`, `content.nonce`/`ciphertext`), base64url without padding, the exact `buildAADV2` associated-data subset (everything except `wrapped_key` and `ciphertext`, canonical-JSON with recursively sorted keys), the two-layer key model (Argon2id -> wrapping key -> random 32-byte vault key -> content), the `self`/`share` mode whitelist, upstream KDF caps (ops 1-10, mem 8-256 MiB), and the upstream strength presets (quick/strong/vault). Proven by cross-implementation tests against the published `@bryan237l/qev-cli@0.30.0` (devDependency) in both directions: buyer vaults minted here decrypt with the upstream implementation, and upstream-encrypted vaults unlock here.
+
+Commerce profile on top of the format. `lock()` encrypts into a custody vault (mode `self`) under a random custody passphrase returned as `keyMaterialB64` — a secret the caller holds; it is never persisted, serialized into results, or logged (audited). `wrapForCredential()` mints a buyer-specific vault (mode `share`) under the buyer's raw unlock code, sealing the commerce binding (asset version, file name, mime type, content SHA-256, and license id) inside the authenticated plaintext as a `MYDIGITAL-LOCKED-ASSET-V1` wrapper. The vault document stays 100% upstream-format while the binding is tamper-evident through AEAD; swapping or editing any bound field breaks authentication.
+
+Real failure semantics, structured: wrong credential or tampered metadata -> `VAULT_WRAP_AUTH_FAILED` with zero plaintext returned; tampered ciphertext with a valid credential -> `VAULT_CONTENT_AUTH_FAILED`; KDF parameters outside upstream caps are rejected; `verifyVaultStructure()` checks schema/version/mode/KDF/wrap/content shape and field lengths and reports decryption as explicitly not-attempted.
+
+Contract changes: `EnvelopeLockResult.keyMaterialB64?` (documented as secret custody material) and `BuyerWrappingEnvelopeAdapter.wrapForCredential` in `@my-digital/types`; `isBuyerWrappingEnvelopeAdapter` guard in core. `runLifecycleDemo` now auto-numbers steps and inserts a "mint buyer-specific vault" step for wrapping adapters (14 steps on QEV, 13 on demo). `pnpm demo:qev` runs the lifecycle on real crypto at the upstream "strong" preset.
+
+Dependency note: `libsodium-wrappers-sumo@0.7.16` ships a broken ESM entry (its `.mjs` imports a sibling file that does not exist in the package — the same bug upstream works around with `createRequire`). Fixed once for all toolchains via a committed pnpm patch (`patches/libsodium-wrappers-sumo@0.7.16.patch`) pointing the `import` condition at the working CJS build; verified with a frozen-lockfile reinstall. `@my-digital/envelope` is marked `sideEffects: false`, so the web bundle (demo adapter only) does not include libsodium — bundle size unchanged.
+
+Deliberate deferrals, with reasons: the web app and the SQLite demo database stay on the demo adapter because the QEV adapter's custody key material belongs server-side; teaching content keys into browser localStorage or the demo database would model the wrong architecture even labeled. The API-server stage migrates both. Upstream CLI constraints recorded: UTF-8 plaintext required (text assets are directly CLI-openable; binary assets unlock via My Digital tooling) and 1 MiB ciphertext cap.
+
+Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (103 tests: 43 core, 30 store, 20 envelope, 4 web, 6 lifecycle-demo), `pnpm demo`, `pnpm demo:qev`, `pnpm db:seed`, `pnpm db:verify <code>` all pass.
+
+Next expected action:
+
+- Stage 6 fingerprint/trace layer (manifest-level fingerprinting with honest evidence levels), or the thin API server over `@my-digital/store` to move the web app off localStorage and give the QEV adapter real server-side key custody — whichever Bryan prioritizes.

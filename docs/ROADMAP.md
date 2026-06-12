@@ -132,7 +132,7 @@ Exit criteria:
 
 ## Stage 5 — Real QEV integration
 
-Status: next.
+Status: complete (2026-06-11). `QevVaultV2EnvelopeAdapter` in `@my-digital/envelope` implements `BRY-NFET-SX-VAULT-V2` with real Argon2id + XChaCha20-Poly1305 via libsodium, cross-implementation tested against the published `@bryan237l/qev-cli`. Demo adapter retained for lifecycle tests. `pnpm demo:qev` runs the lifecycle on real crypto. Web/db stay on the demo adapter until server-side key custody exists.
 
 Goal: replace demo envelope behavior with QEV Vault V2 integration.
 
@@ -151,6 +151,8 @@ Exit criteria:
 - docs explain what is production crypto vs lifecycle demo
 
 ## Stage 6 — Fingerprint/trace layer
+
+Status: next.
 
 Goal: begin leak traceability honestly.
 

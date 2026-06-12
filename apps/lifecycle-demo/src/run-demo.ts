@@ -1,13 +1,23 @@
 import { runLifecycleDemo, utf8Bytes } from "@my-digital/core";
 import type { VerificationResult } from "@my-digital/types";
-import { DemoEnvelopeAdapter } from "@my-digital/envelope";
+import { DemoEnvelopeAdapter, QevVaultV2EnvelopeAdapter } from "@my-digital/envelope";
+
+const useQev = process.argv.includes("--qev");
 
 function banner(): void {
   console.log("=".repeat(74));
   console.log("My Digital local lifecycle demo");
-  console.log("DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING");
-  console.log("Envelope locking uses the demo adapter. Hashes (SHA-256) and issuer");
-  console.log("signatures (Ed25519, ephemeral demo key) are real cryptographic checks.");
+  if (useQev) {
+    console.log("ENVELOPE: QEV Vault V2 production adapter (BRY-NFET-SX-VAULT-V2)");
+    console.log("Lock/wrap/unlock use real Argon2id + XChaCha20-Poly1305 via libsodium.");
+    console.log("Argon2id runs at the upstream 'strong' preset, so expect a few seconds.");
+    console.log("Still simulated: payment provider (mock) and custody of the creator");
+    console.log("key material, which is held in process memory only for this run.");
+  } else {
+    console.log("DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING");
+    console.log("Envelope locking uses the demo adapter. Hashes (SHA-256) and issuer");
+    console.log("signatures (Ed25519, ephemeral demo key) are real cryptographic checks.");
+  }
   console.log("=".repeat(74));
 }
 
@@ -23,7 +33,10 @@ function printVerification(name: string, verification: VerificationResult): void
 
 banner();
 
-const result = await runLifecycleDemo(new DemoEnvelopeAdapter(), {
+const adapter = useQev
+  ? new QevVaultV2EnvelopeAdapter({ preset: "strong" })
+  : new DemoEnvelopeAdapter();
+const result = await runLifecycleDemo(adapter, {
   payload: utf8Bytes("Demo product: 10 example prompts for testing the QEV commerce lifecycle.")
 });
 
@@ -45,6 +58,16 @@ console.log(JSON.stringify(result.receipt, null, 2));
 
 console.log("\nIssuer public key (base64, ephemeral demo key):");
 console.log(`  ${result.issuer.publicKeyB64}`);
+
+if (result.buyerLockedPayload) {
+  console.log("\nBuyer-specific vault:");
+  console.log(
+    `  ${result.buyerLockedPayload.byteLength} bytes, standard BRY-NFET-SX-VAULT-V2 document.`
+  );
+  console.log(
+    "  Text assets in this format are decryptable by the upstream qev CLI using the buyer's unlock code."
+  );
+}
 
 const failedSteps = result.steps.filter((step) => !step.ok);
 if (failedSteps.length > 0) {

@@ -219,6 +219,12 @@ export interface EnvelopeLockResult {
   metadataHash: string;
   qevEngineVersion: string;
   developmentOnly: boolean;
+  /**
+   * Custody key material returned by adapters whose lock operation produces
+   * a key needed to mint buyer-specific wraps later. Treat as a secret: it
+   * decrypts the locked asset. Absent for adapters without buyer wrapping.
+   */
+  keyMaterialB64?: string;
 }
 
 export interface EnvelopeUnlockInput {
@@ -243,6 +249,31 @@ export interface EnvelopeAdapter {
   lock(input: EnvelopeLockInput): Promise<EnvelopeLockResult>;
   unlock(input: EnvelopeUnlockInput): Promise<EnvelopeUnlockResult>;
   verify(input: EnvelopeVerifyInput): Promise<VerificationResult>;
+}
+
+export interface WrapForCredentialInput {
+  /** The locked payload produced by lock() (the custody envelope). */
+  lockedPayload: Uint8Array;
+  /** The custody key material returned by lock(). */
+  keyMaterialB64: string;
+  /** The buyer credential (raw unlock code or passphrase). */
+  credential: string;
+  /** The license this wrap is bound to. */
+  licenseId: LicenseId;
+}
+
+export interface WrapForCredentialResult {
+  /** Buyer-specific locked payload, unlockable only with the credential. */
+  buyerLockedPayload: Uint8Array;
+  buyerLockedPayloadHash: string;
+}
+
+/**
+ * Envelope adapters that support minting buyer-specific locked payloads
+ * from a custody-locked asset plus a buyer credential.
+ */
+export interface BuyerWrappingEnvelopeAdapter extends EnvelopeAdapter {
+  wrapForCredential(input: WrapForCredentialInput): Promise<WrapForCredentialResult>;
 }
 
 export type CheckoutSessionId = Brand<string, "CheckoutSessionId">;

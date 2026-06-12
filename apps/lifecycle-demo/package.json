@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "demo": "tsx src/run-demo.ts",
+    "demo:qev": "tsx src/run-demo.ts --qev",
     "seed": "tsx src/seed-db.ts",
     "verify-db": "tsx src/verify-db.ts",
     "build": "tsc -p tsconfig.json --noEmit",
