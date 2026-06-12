@@ -165,6 +165,22 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
     const found = this.buyerLockedPayloads.get(licenseId);
     return found ? { payload: new Uint8Array(found.payload), payloadHash: found.payloadHash } : null;
   }
+  async findBuyerLockedPayloadByHash(
+    payloadHash: string
+  ): Promise<{ licenseId: LicenseId; payloadHash: string } | null> {
+    for (const [licenseId, entry] of this.buyerLockedPayloads) {
+      if (entry.payloadHash === payloadHash) {
+        return { licenseId: licenseId as LicenseId, payloadHash };
+      }
+    }
+    return null;
+  }
+  async findAssetVersionByContentHash(contentHash: string): Promise<AssetVersion | null> {
+    const found = [...this.assetVersions.values()].find(
+      (entry) => entry.contentHash === contentHash
+    );
+    return found ? clone(found) : null;
+  }
 
   async insertListing(listing: Listing): Promise<void> {
     this.listings.set(listing.id, clone(listing));

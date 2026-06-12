@@ -4,6 +4,7 @@ import type {
   Buyer,
   BuyerLicense,
   Creator,
+  Fingerprint,
   LicenseId,
   LicenseTerms,
   Listing,
@@ -13,6 +14,7 @@ import type {
   ProofReceiptId,
   Purchase,
   Revocation,
+  TraceResult,
   UnlockCode,
   VerificationResult
 } from "@my-digital/types";
@@ -31,6 +33,14 @@ export interface ServerState {
   unlockCodes: UnlockCode[];
   receipts: ProofReceipt[];
   revocations: Revocation[];
+  fingerprints: Fingerprint[];
+}
+
+export interface BuyerLibrary {
+  buyer: Buyer;
+  purchases: Purchase[];
+  licenses: BuyerLicense[];
+  receipts: ProofReceipt[];
 }
 
 export type ServerCheckoutOutcome =
@@ -134,5 +144,9 @@ export const api = {
     requestJson<VerificationResult>(`/api/licenses/${licenseId}/verify`),
   getReceiptBundle: (receiptId: ProofReceiptId) =>
     requestJson<ReceiptBundle>(`/api/receipts/${receiptId}/bundle`),
+  trace: (artifactB64: string) =>
+    requestJson<TraceResult>("/api/trace", postJson({ artifactB64 })),
+  getBuyerLibrary: (emailHash: string) =>
+    requestJson<BuyerLibrary>(`/api/buyers/${emailHash}/library`),
   reset: () => requestJson<{ ok: boolean }>("/api/admin/reset", { method: "POST" })
 };

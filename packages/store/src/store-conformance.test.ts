@@ -338,6 +338,21 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.getBuyerLockedPayload("license_missing" as LicenseId)).toBeNull();
     });
 
+    it("finds buyer locked payloads by hash for tracing", async () => {
+      expect(await store.findBuyerLockedPayloadByHash("9a".repeat(32))).toEqual({
+        licenseId: license.id,
+        payloadHash: "9a".repeat(32)
+      });
+      expect(await store.findBuyerLockedPayloadByHash("00".repeat(32))).toBeNull();
+    });
+
+    it("finds asset versions by content hash for tracing", async () => {
+      expect(await store.findAssetVersionByContentHash(assetVersion.contentHash)).toEqual(
+        assetVersion
+      );
+      expect(await store.findAssetVersionByContentHash("0f".repeat(32))).toBeNull();
+    });
+
     it("round-trips fingerprints and revocations", async () => {
       await store.insertFingerprint(fingerprint);
       await store.insertRevocation(revocation);

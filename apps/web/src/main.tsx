@@ -5,8 +5,10 @@ import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
 import { CheckoutPage } from "./pages/CheckoutPage";
 import { CreatorPage } from "./pages/CreatorPage";
 import { HomePage } from "./pages/HomePage";
+import { LibraryPage } from "./pages/LibraryPage";
 import { ListingPage } from "./pages/ListingPage";
 import { SellPage } from "./pages/SellPage";
+import { TracePage } from "./pages/TracePage";
 import { UnlockPage } from "./pages/UnlockPage";
 import { VerifyPage } from "./pages/VerifyPage";
 import "./styles.css";
@@ -22,8 +24,12 @@ function Layout() {
         </Link>
         <div className="nav-links">
           <NavLink to="/sell">Sell</NavLink>
+          <NavLink to="/library">Library</NavLink>
           <NavLink to="/unlock">Unlock</NavLink>
-          <NavLink to="/verify">Verify</NavLink>
+          <NavLink to="/verify" end>
+            Verify
+          </NavLink>
+          <NavLink to="/trace">Trace</NavLink>
           <NavLink to="/creator">Creator</NavLink>
         </div>
         <span className="pill pill-demo">DEV · MOCK PAYMENTS</span>
@@ -87,6 +93,9 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/checkout/:listingId" element={<CheckoutPage />} />
             <Route path="/unlock" element={<UnlockPage />} />
             <Route path="/verify" element={<VerifyPage />} />
+            <Route path="/verify/:receiptId" element={<VerifyPage />} />
+            <Route path="/trace" element={<TracePage />} />
+            <Route path="/library" element={<LibraryPage />} />
             <Route path="/creator" element={<CreatorPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>

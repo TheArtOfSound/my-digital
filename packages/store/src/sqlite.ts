@@ -458,6 +458,27 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
       .get();
     return row ? { payload: new Uint8Array(row.payload), payloadHash: row.payloadHash } : null;
   }
+  async findBuyerLockedPayloadByHash(
+    payloadHash: string
+  ): Promise<{ licenseId: LicenseId; payloadHash: string } | null> {
+    const row = this.db
+      .select({
+        licenseId: schema.buyerLockedPayloads.licenseId,
+        payloadHash: schema.buyerLockedPayloads.payloadHash
+      })
+      .from(schema.buyerLockedPayloads)
+      .where(eq(schema.buyerLockedPayloads.payloadHash, payloadHash))
+      .get();
+    return row ? { licenseId: row.licenseId as LicenseId, payloadHash: row.payloadHash } : null;
+  }
+  async findAssetVersionByContentHash(contentHash: string): Promise<AssetVersion | null> {
+    const row = this.db
+      .select()
+      .from(schema.assetVersions)
+      .where(eq(schema.assetVersions.contentHash, contentHash))
+      .get();
+    return row ? rowToAssetVersion(row) : null;
+  }
 
   async insertListing(listing: Listing): Promise<void> {
     this.db

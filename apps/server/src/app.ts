@@ -121,6 +121,23 @@ export function createApp(service: MarketplaceService): Hono {
     return c.json(bundle);
   });
 
+  app.post("/api/trace", async (c) => {
+    const body = await c.req.json<{ artifactB64: string }>();
+    if (typeof body.artifactB64 !== "string" || body.artifactB64.length === 0) {
+      return c.json({ error: "Provide the artifact as base64." }, 400);
+    }
+    if (body.artifactB64.length > 8_000_000) {
+      return c.json({ error: "Artifact exceeds the dev trace size limit." }, 413);
+    }
+    return c.json(await service.trace(base64ToBytes(body.artifactB64)));
+  });
+
+  app.get("/api/buyers/:emailHash/library", async (c) => {
+    const library = await service.getBuyerLibrary(c.req.param("emailHash"));
+    if (!library) return c.json({ error: "No buyer exists for this email." }, 404);
+    return c.json(library);
+  });
+
   app.post("/api/admin/reset", async (c) => {
     await service.reset();
     return c.json({ ok: true });

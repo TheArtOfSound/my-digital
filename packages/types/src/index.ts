@@ -289,6 +289,8 @@ export interface CheckoutSession {
   providerReference: string;
   createdAt: string;
   completedAt?: string;
+  /** Hosted checkout URL for redirect-based providers; absent for the mock. */
+  checkoutUrl?: string;
 }
 
 export interface CreateCheckoutInput {
@@ -312,4 +314,37 @@ export interface PaymentConfirmation {
 export interface PaymentAdapter {
   createCheckout(input: CreateCheckoutInput): Promise<CheckoutSession>;
   confirmPayment(input: ConfirmPaymentInput): Promise<PaymentConfirmation>;
+}
+
+/**
+ * Honest trace evidence levels, strongest to weakest:
+ * - exact-vault-match: byte-identical to a buyer vault minted by this
+ *   marketplace; attributable to a specific license.
+ * - plaintext-content-match: matches a listed asset's decrypted content;
+ *   plaintext copies carry no buyer-specific marking, so no attribution.
+ * - vault-format-unattributed: a valid QEV vault, but not one minted here.
+ * - no-evidence: unsupported artifact type; no fingerprinting exists for it.
+ */
+export type TraceEvidenceLevel =
+  | "exact-vault-match"
+  | "plaintext-content-match"
+  | "vault-format-unattributed"
+  | "no-evidence";
+
+export interface TraceResult {
+  id: string;
+  evidenceLevel: TraceEvidenceLevel;
+  artifactSha256: string;
+  artifactByteSize: number;
+  explanation: string;
+  caveats: string[];
+  checkedAt: string;
+  match?: {
+    licenseId?: LicenseId;
+    buyerIdHash?: string;
+    assetId?: AssetId;
+    assetVersionId?: AssetVersionId;
+    fingerprintId?: FingerprintId;
+    licenseRevoked?: boolean;
+  };
 }

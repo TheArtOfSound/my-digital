@@ -88,6 +88,12 @@ export interface MarketplaceStore {
   getBuyerLockedPayload(
     licenseId: LicenseId
   ): Promise<{ payload: Uint8Array; payloadHash: string } | null>;
+  /** Trace support: find which license a leaked vault was minted for. */
+  findBuyerLockedPayloadByHash(
+    payloadHash: string
+  ): Promise<{ licenseId: LicenseId; payloadHash: string } | null>;
+  /** Trace support: find which asset version a leaked plaintext belongs to. */
+  findAssetVersionByContentHash(contentHash: string): Promise<AssetVersion | null>;
 
   insertListing(listing: Listing): Promise<void>;
   getListing(id: ListingId): Promise<Listing | null>;

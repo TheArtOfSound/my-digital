@@ -193,6 +193,75 @@ describe("MarketplaceService checkout", () => {
   });
 });
 
+describe("MarketplaceService trace", () => {
+  it("attributes a leaked buyer vault to its license by exact hash match", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    const outcome = (await service.checkout({
+      listingId: listing.id,
+      email: "buyer@example.com"
+    })) as Extract<CheckoutOutcome, { outcome: "paid" }>;
+    const vault = await service.getBuyerVault(outcome.license.id);
+
+    const result = await service.trace(vault?.payload ?? new Uint8Array());
+    expect(result.evidenceLevel).toBe("exact-vault-match");
+    expect(result.match?.licenseId).toBe(outcome.license.id);
+    expect(result.match?.fingerprintId).toBeDefined();
+    expect(result.match?.licenseRevoked).toBe(false);
+    expect(result.caveats.join(" ")).toContain("not who circulated it");
+  });
+
+  it("reports plaintext matches honestly as unattributable", async () => {
+    const { service } = await makeService();
+    await seedListing(service);
+    const result = await service.trace(PAYLOAD);
+    expect(result.evidenceLevel).toBe("plaintext-content-match");
+    expect(result.match?.assetVersionId).toBeDefined();
+    expect(result.match?.licenseId).toBeUndefined();
+    expect(result.explanation).toContain("plaintext copy");
+    expect(result.caveats.join(" ")).toContain("attribution to a specific buyer is not possible");
+  });
+
+  it("recognizes foreign vaults without claiming attribution", async () => {
+    const { service } = await makeService();
+    const foreignAdapter = new QevVaultV2EnvelopeAdapter({ preset: "quick" });
+    const foreignLock = await foreignAdapter.lock({
+      assetVersionId: "assetver_foreign" as never,
+      fileName: "foreign.txt",
+      mimeType: "text/plain",
+      plaintext: utf8Bytes("foreign vault content")
+    });
+    const result = await service.trace(foreignLock.lockedPayload);
+    expect(result.evidenceLevel).toBe("vault-format-unattributed");
+    expect(result.match).toBeUndefined();
+  });
+
+  it("reports unsupported artifacts as no-evidence instead of fake confidence", async () => {
+    const { service } = await makeService();
+    const result = await service.trace(utf8Bytes("just some random text file"));
+    expect(result.evidenceLevel).toBe("no-evidence");
+    expect(result.explanation).toContain("Unsupported artifact type");
+    expect(result.match).toBeUndefined();
+  });
+});
+
+describe("MarketplaceService buyer library", () => {
+  it("returns a buyer's purchases, licenses, and receipts by email hash", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    await service.checkout({ listingId: listing.id, email: "library@example.com" });
+    await service.checkout({ listingId: listing.id, email: "other@example.com" });
+
+    const { hashEmail } = await import("@my-digital/core");
+    const library = await service.getBuyerLibrary(await hashEmail("library@example.com"));
+    expect(library).not.toBeNull();
+    expect(library?.purchases).toHaveLength(1);
+    expect(library?.licenses).toHaveLength(1);
+    expect(library?.receipts).toHaveLength(1);
+    expect(await service.getBuyerLibrary("00".repeat(32))).toBeNull();
+  });
+});
+
 describe("issuer persistence across restarts", () => {
   it("a second service instance on the same database keeps the issuer and old licenses verify", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "mydigital-server-"));

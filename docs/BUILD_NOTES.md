@@ -228,3 +228,32 @@ Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (120 tests across 6 pack
 Next expected action:
 
 - Stage 6 fingerprint/trace layer: every buyer vault is already unique and carries its license id sealed inside, so "this exact leaked vault was issued to license X" is an honest hash-match claim — build the trace check on top. Or continue Stage 7: buyer library/auth, Stripe adapter behind the payment contract, deployment to the proposed `mydigital.imagineqira.com`.
+
+## 2026-06-11 Stage 6 trace + Stage 7 continuation pass ("go all")
+
+Four deliverables: the trace layer (Stage 6 complete), the buyer library, the Stripe adapter package, and the deployment plan. The lifecycle spine CREATE → … → TRACE is now implemented end to end.
+
+Trace (Stage 6). Every paid checkout now also writes a `Fingerprint` record — the buyer vault IS the fingerprint (`buyer-vault-sha256`, `per-buyer-vault-reencryption`, `exact-hash-match`): unique per buyer with the license id sealed inside the AEAD. `POST /api/trace` (and the `/trace` page) accepts a suspected leaked artifact and returns a `TraceResult` with honest evidence levels, exactly as the roadmap requires:
+
+- `exact-vault-match`: byte-identical to a minted buyer vault → attributes license, buyer id hash, asset version, fingerprint record, and revocation status. Caveats state plainly that possession identifies whose copy circulated, not who circulated it.
+- `plaintext-content-match`: matches a listed asset's content hash → says attribution is impossible because plaintext carries no buyer marking (per-buyer watermarking remains future work and is not claimed).
+- `vault-format-unattributed`: structurally valid QEV vault not minted by this instance.
+- `no-evidence`: unsupported artifact types report themselves as unsupported rather than implying confidence.
+
+Store gains `findBuyerLockedPayloadByHash` and `findAssetVersionByContentHash` on both implementations (conformance-tested); `fingerprints` joined into `/api/state`.
+
+Buyer library. `/library` looks up purchases/licenses/receipts by email — hashed in the browser, only the hash travels (`GET /api/buyers/:emailHash/library`). Vault and receipt-bundle downloads per license, revocation status visible. Labeled in the UI for what it is: a dev convenience, not authentication.
+
+Stripe adapter. `@my-digital/payments-stripe` implements the `PaymentAdapter` contract: hosted Checkout Session creation (amount/metadata-bound), poll-based `confirmPayment` for the success-url return path, webhook verification via `confirmFromWebhook` (completed/expired events, idempotent like the mock, amount/currency tamper refusal, mock-only `simulateOutcome` rejected). Fully unit-tested against an injected fake client (8 tests). Honest status: NOT yet exercised against live Stripe; the go-live checklist (redirect-flow split, webhook fulfillment, sealed one-time code delivery, live test purchase) lives in `docs/DEPLOYMENT.md`. `CheckoutSession` gained an optional `checkoutUrl` for redirect providers.
+
+Receipt deep link. `/verify/:receiptId` — the exact URL shape printed on receipts (`https://mydigital.imagineqira.com/verify/<id>`) — auto-selects and verifies the receipt on load, with an honest banner (paste-the-bundle fallback) when the receipt is not in this instance's records.
+
+Deployment. `docs/DEPLOYMENT.md`: same-origin web+API behind a reverse proxy (SPA fallback required for receipt deep links), env table, master-key discipline (secret manager, loss semantics: buyer vaults still unlock; custody/issuer sealing unrecoverable), backup/restore drill, Stripe go-live checklist, hardening list (auth, reset-endpoint gating, rate limits). Nothing is deployed yet; the plan is the deliverable.
+
+Browser-verified: trace exact-match attributing a re-uploaded vault to its license/buyer-hash/fingerprint; plaintext trace honestly unattributable; garbage → no-evidence; library showing ACTIVE and REVOKED licenses with downloads; `/verify/<receiptId>` deep link auto-verifying all four receipt checks on a fresh page load. No console errors.
+
+Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` — 137 tests across 7 packages (43 core, 40 store, 20 envelope, 8 payments-stripe, 4 web, 6 lifecycle-demo, 16 server).
+
+Next expected action:
+
+- Stage 7 to beta per `docs/DEPLOYMENT.md`: pick a host, wire the Stripe redirect/webhook flow with live test keys, add real buyer auth, gate the admin reset, deploy to `mydigital.imagineqira.com`.

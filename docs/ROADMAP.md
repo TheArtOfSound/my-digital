@@ -152,7 +152,7 @@ Exit criteria:
 
 ## Stage 6 — Fingerprint/trace layer
 
-Status: next.
+Status: complete (2026-06-11). Fingerprint records are written at checkout (the buyer vault is the fingerprint: unique per buyer, license id sealed inside). `POST /api/trace` and the `/trace` page return honest evidence levels: exact-vault-match (attributed), plaintext-content-match (explicitly unattributable), vault-format-unattributed, no-evidence for unsupported types. Per-buyer visible watermarking remains future work and is not claimed.
 
 Goal: begin leak traceability honestly.
 
@@ -171,7 +171,7 @@ Exit criteria:
 
 ## Stage 7 — Creator marketplace beta
 
-Status: in progress. Server backbone done (2026-06-11): `apps/server` (Hono + SQLite store) locks with the real QEV adapter, seals custody and issuer secrets under a master key, mints buyer vaults at paid checkout, and serves the web app — which now runs against the API with local-first, in-browser unlock. Remaining for beta: buyer accounts/auth, Stripe adapter, deployment, support/recovery docs.
+Status: in progress. Server backbone done (2026-06-11): `apps/server` (Hono + SQLite store) locks with the real QEV adapter, seals custody and issuer secrets under a master key, mints buyer vaults at paid checkout, and serves the web app — which now runs against the API with local-first, in-browser unlock. Also done: buyer library (email-hash lookup, dev convenience), `@my-digital/payments-stripe` behind the payment contract (unit-tested; live validation pending per `docs/DEPLOYMENT.md`), receipt deep links at `/verify/:receiptId`, and the deployment plan for `mydigital.imagineqira.com`. Remaining for beta: real buyer auth, Stripe go-live (redirect/webhook flow with live keys), actual deployment, support/recovery docs.
 
 Goal: actual seller/buyer product.
 

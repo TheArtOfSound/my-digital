@@ -10,7 +10,10 @@ import {
   hashEmail,
   issueBuyerLicense,
   issueUnlockCode,
+  newFingerprintId,
   newRevocationId,
+  sha256Hex,
+  sha256HexOfString,
   signCanonical,
   verifyBuyerLicense
 } from "@my-digital/core";
@@ -22,6 +25,7 @@ import type {
   BuyerLicense,
   BuyerWrappingEnvelopeAdapter,
   Creator,
+  Fingerprint,
   LicenseId,
   LicenseTerms,
   ListingId,
@@ -33,6 +37,7 @@ import type {
   ProofReceiptId,
   Purchase,
   Revocation,
+  TraceResult,
   UnlockCode,
   VerificationResult
 } from "@my-digital/types";
@@ -64,6 +69,7 @@ export interface ServerState {
   unlockCodes: UnlockCode[];
   receipts: ProofReceipt[];
   revocations: Revocation[];
+  fingerprints: Fingerprint[];
 }
 
 export interface CreateListingInput {
@@ -140,7 +146,8 @@ export class MarketplaceService {
       licenses,
       unlockCodes,
       receipts: await store.listProofReceipts(),
-      revocations: await store.listRevocations()
+      revocations: await store.listRevocations(),
+      fingerprints: await store.listFingerprints()
     };
   }
 
@@ -302,6 +309,18 @@ export class MarketplaceService {
       wrap.buyerLockedPayloadHash
     );
     await store.insertProofReceipt(receipt);
+    // The buyer vault IS the fingerprint: unique per buyer, license id sealed
+    // inside, attributable by exact hash match.
+    await store.insertFingerprint({
+      id: newFingerprintId(),
+      licenseId: license.id,
+      assetVersionId: assetVersion.id,
+      fingerprintType: "buyer-vault-sha256",
+      fingerprintHash: wrap.buyerLockedPayloadHash,
+      embeddingStrategy: "per-buyer-vault-reencryption",
+      confidenceModel: "exact-hash-match",
+      createdAt: new Date().toISOString()
+    });
 
     return {
       outcome: "paid",
@@ -381,6 +400,131 @@ export class MarketplaceService {
     const receipt = await this.opts.store.getProofReceipt(receiptId);
     if (!receipt) return null;
     return { kind: RECEIPT_BUNDLE_KIND, receipt, issuer: this.issuerInfo() };
+  }
+
+  /**
+   * Trace a suspected leaked artifact. Returns honest evidence levels only:
+   * exact vault hash matches attribute to a license; plaintext matches state
+   * plainly that no attribution is possible; everything else reports itself
+   * as unattributed or unsupported rather than implying confidence.
+   */
+  async trace(artifact: Uint8Array): Promise<TraceResult> {
+    const { store } = this.opts;
+    const artifactSha256 = await sha256Hex(artifact);
+    const base: Omit<TraceResult, "evidenceLevel" | "explanation" | "caveats"> = {
+      id: `trace_${crypto.randomUUID()}`,
+      artifactSha256,
+      artifactByteSize: artifact.byteLength,
+      checkedAt: new Date().toISOString()
+    };
+    const standingCaveat =
+      "Trace evidence supports an investigation; it is not standalone proof of who leaked a file.";
+
+    const vaultMatch = await store.findBuyerLockedPayloadByHash(artifactSha256);
+    if (vaultMatch) {
+      const license = await store.getLicense(vaultMatch.licenseId);
+      const fingerprint = (await store.listFingerprints()).find(
+        (entry) => entry.fingerprintHash === artifactSha256
+      );
+      return {
+        ...base,
+        evidenceLevel: "exact-vault-match",
+        explanation:
+          "This artifact is byte-identical to a buyer vault minted by this marketplace. It is the exact encrypted package issued for the matched license.",
+        caveats: [
+          "Possession of the vault identifies which buyer's copy circulated, not who circulated it.",
+          "The vault is still encrypted; without the unlock code it does not expose the content.",
+          standingCaveat
+        ],
+        match: {
+          ...(license
+            ? {
+                licenseId: license.id,
+                buyerIdHash: await sha256HexOfString(license.buyerId),
+                assetId: license.assetId,
+                assetVersionId: license.assetVersionId,
+                licenseRevoked: license.revokedAt !== undefined
+              }
+            : { licenseId: vaultMatch.licenseId }),
+          ...(fingerprint ? { fingerprintId: fingerprint.id } : {})
+        }
+      };
+    }
+
+    const contentMatch = await store.findAssetVersionByContentHash(artifactSha256);
+    if (contentMatch) {
+      return {
+        ...base,
+        evidenceLevel: "plaintext-content-match",
+        explanation:
+          "This artifact matches the decrypted content of a listed asset version. It is a plaintext copy of that product.",
+        caveats: [
+          "Plaintext copies carry no buyer-specific marking, so attribution to a specific buyer is not possible.",
+          "Per-buyer watermarking of display formats is future work and will be claimed only once it exists.",
+          standingCaveat
+        ],
+        match: {
+          assetId: contentMatch.assetId,
+          assetVersionId: contentMatch.id
+        }
+      };
+    }
+
+    const adapter = this.opts.envelope as {
+      verifyVaultStructure?: (bytes: Uint8Array) => Promise<VerificationResult>;
+    };
+    const structure = adapter.verifyVaultStructure
+      ? await adapter.verifyVaultStructure(artifact)
+      : null;
+    if (structure && structure.status === "pass") {
+      return {
+        ...base,
+        evidenceLevel: "vault-format-unattributed",
+        explanation:
+          "This artifact is a structurally valid QEV vault, but it does not match any vault minted by this marketplace instance.",
+        caveats: [
+          "It may come from another QEV surface, another marketplace instance, or a re-encryption.",
+          standingCaveat
+        ]
+      };
+    }
+
+    return {
+      ...base,
+      evidenceLevel: "no-evidence",
+      explanation:
+        "Unsupported artifact type for tracing: it matches no minted vault, no listed content, and is not a QEV vault.",
+      caveats: [
+        "No fingerprinting exists for this file type, so no honest evidence is available.",
+        standingCaveat
+      ]
+    };
+  }
+
+  /**
+   * Buyer library lookup by email hash. Dev convenience, not authentication:
+   * production buyer accounts arrive with real auth.
+   */
+  async getBuyerLibrary(emailHash: string): Promise<{
+    buyer: Buyer;
+    purchases: Purchase[];
+    licenses: BuyerLicense[];
+    receipts: ProofReceipt[];
+  } | null> {
+    const { store } = this.opts;
+    const buyer = await store.getBuyerByEmailHash(emailHash);
+    if (!buyer) return null;
+    const purchases = (await store.listPurchases()).filter(
+      (entry) => entry.buyerId === buyer.id
+    );
+    const licenses = (await store.listLicenses()).filter(
+      (entry) => entry.buyerId === buyer.id
+    );
+    const licenseIds = new Set(licenses.map((entry) => entry.id as string));
+    const receipts = (await store.listProofReceipts()).filter((entry) =>
+      licenseIds.has(entry.licenseId)
+    );
+    return { buyer, purchases, licenses, receipts };
   }
 
   /** Destructive dev reset: wipes all records and bootstraps a fresh issuer. */

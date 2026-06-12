@@ -1,5 +1,6 @@
 import {
   bytesToBase64,
+  hashEmail,
   importIssuerPublicKey,
   sha256Hex,
   verifyBuyerLicense,
@@ -18,6 +19,7 @@ import type {
   LockedAssetId,
   ProofReceipt,
   ProofReceiptId,
+  TraceResult,
   VerificationResult
 } from "@my-digital/types";
 import {
@@ -30,7 +32,13 @@ import {
   useState,
   type ReactNode
 } from "react";
-import { api, type ReceiptBundle, type ServerCheckoutOutcome, type ServerState } from "./api";
+import {
+  api,
+  type BuyerLibrary,
+  type ReceiptBundle,
+  type ServerCheckoutOutcome,
+  type ServerState
+} from "./api";
 import { checkDemoCryptoSupport } from "./capability";
 
 export const RECEIPT_BUNDLE_KIND = "MYDIGITAL-RECEIPT-BUNDLE-V1";
@@ -54,7 +62,8 @@ function emptyServerState(): ServerState {
     licenses: [],
     unlockCodes: [],
     receipts: [],
-    revocations: []
+    revocations: [],
+    fingerprints: []
   };
 }
 
@@ -131,6 +140,8 @@ interface MarketplaceActions {
     options?: { simulateTamper?: boolean }
   ): Promise<LockedAssetVerification>;
   getReceiptBundle(receiptId: ProofReceiptId): Promise<ReceiptBundle>;
+  traceArtifact(bytes: Uint8Array): Promise<TraceResult>;
+  fetchLibraryByEmail(email: string): Promise<BuyerLibrary>;
   resetDemo(): Promise<void>;
 }
 
@@ -399,6 +410,19 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
       async getReceiptBundle(receiptId) {
         return api.getReceiptBundle(receiptId);
+      },
+
+      async traceArtifact(bytes) {
+        if (bytes.byteLength === 0) throw new Error("The artifact is empty.");
+        if (bytes.byteLength > 5_000_000) {
+          throw new Error("Keep trace artifacts under 5 MB in the dev instance.");
+        }
+        return api.trace(bytesToBase64(bytes));
+      },
+
+      async fetchLibraryByEmail(email) {
+        // Email is hashed in the browser; only the hash travels to the server.
+        return api.getBuyerLibrary(await hashEmail(email));
       },
 
       async resetDemo() {

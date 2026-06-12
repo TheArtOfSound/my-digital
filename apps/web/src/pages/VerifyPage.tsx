@@ -4,7 +4,8 @@ import type {
   ProofReceiptId,
   VerificationResult
 } from "@my-digital/types";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import { VerificationResultView } from "../components/VerificationResultView";
 import {
   useMarketplace,
@@ -31,10 +32,27 @@ function useAsyncVerify() {
 
 export function VerifyPage() {
   const { state, actions } = useMarketplace();
+  const { receiptId: receiptIdParam } = useParams<{ receiptId: string }>();
 
   const [receiptId, setReceiptId] = useState("");
   const [receiptResult, setReceiptResult] = useState<VerificationResult | null>(null);
   const receiptVerify = useAsyncVerify();
+  const deepLinkRan = useRef(false);
+  const deepLinkKnown =
+    receiptIdParam === undefined || state.receipts.some((entry) => entry.id === receiptIdParam);
+
+  // Deep link: /verify/<receiptId> is the URL printed on receipts.
+  useEffect(() => {
+    if (receiptIdParam === undefined || deepLinkRan.current || !deepLinkKnown) return;
+    deepLinkRan.current = true;
+    setReceiptId(receiptIdParam);
+    void actions
+      .verifyReceiptRecord(receiptIdParam as ProofReceiptId)
+      .then(setReceiptResult)
+      .catch(() => {
+        // Surfaced through the regular controls if retried manually.
+      });
+  }, [receiptIdParam, deepLinkKnown, actions]);
 
   const [pastedText, setPastedText] = useState("");
   const [pastedResult, setPastedResult] = useState<PastedReceiptVerification | null>(null);
@@ -68,6 +86,13 @@ export function VerifyPage() {
           Every verification returns a structured result: what passed, what failed, what was not
           checked, and what is assumed. A bare “valid” badge is not trustworthy output.
         </p>
+        {receiptIdParam !== undefined && !deepLinkKnown && (
+          <p className="panel-error">
+            Receipt <span className="mono">{receiptIdParam}</span> is not in this instance's
+            records. If the receipt came from elsewhere, paste its bundle below — verification
+            works from the bundle alone.
+          </p>
+        )}
       </section>
 
       <section className="panel">
