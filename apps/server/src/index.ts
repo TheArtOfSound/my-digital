@@ -56,6 +56,7 @@ const staticRoot = existsSync(path.join(webDist, "index.html")) ? webDist : unde
 const adminToken = process.env.MYDIGITAL_ADMIN_TOKEN;
 
 const app = createApp(service, {
+  paymentsProvider: paymentsMode,
   ...(adminToken ? { adminToken } : {}),
   ...(staticRoot ? { staticRoot } : {})
 });

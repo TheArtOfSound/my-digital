@@ -59,7 +59,7 @@ Status 2026-06-12: items 1 and 2 are BUILT and tested (fake client + service tes
 3. Webhook-driven fulfillment with sealed one-time code delivery: deferred together with buyer auth (an unauthenticated retrieval endpoint would hand the code to anyone). The polling flow needs no stored codes.
 4. Enable with env: `MYDIGITAL_PAYMENTS=stripe`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `MYDIGITAL_PUBLIC_URL`. Then: test-mode purchase end to end (web flow needs the small redirect UI: send the buyer to `session.checkoutUrl`, then call `complete` from the `/checkout/done` return page), then ONE live-mode purchase before announcing.
 
-Key note (2026-06-12): the only Stripe keys present on the dev machine are LIVE keys for unrelated ventures. My Digital needs its own Stripe account's TEST keys (`sk_test_…`) for step 4 — do not point this product at another business's live account.
+Live-API validation (2026-06-12, owner-authorized, against the Trend account `acct_1TdqpyGz3eX0vCtE`): the adapter authenticated against live Stripe and created real Checkout Sessions (params accepted); `complete` correctly refused an open session, and after expiring the session at Stripe it settled the purchase as failed; a correctly HMAC-signed webhook was verified by the real Stripe SDK (a forged signature was rejected by the SDK itself) and fulfillment then produced the license, one-time code, receipt, and buyer vault. Both live sessions were expired afterward; zero charges. The ONLY unexercised step in the whole system is a human completing the hosted page with a real card — that single purchase remains the final go-live gate, ideally on a My Digital-branded Stripe account rather than Trend.
 
 ## 5. Hardening before public beta
 

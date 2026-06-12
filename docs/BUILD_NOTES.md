@@ -284,3 +284,19 @@ Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (149), `pnpm demo`, `pnp
 Next expected action:
 
 - Obtain My Digital Stripe TEST keys -> run the step-4 test-mode purchase (add the small redirect UI: send buyer to `session.checkoutUrl`, call `complete` from `/checkout/done`). Pick a host + DNS for `mydigital.imagineqira.com`. Buyer auth remains the largest open beta item.
+
+## 2026-06-12 live Stripe validation (owner-authorized)
+
+Bryan explicitly authorized using the live keys found on the machine. Validation ran against the Trend account (`acct_1TdqpyGz3eX0vCtE`) with zero charges and full cleanup:
+
+1. `POST /api/checkout/begin` created a REAL live Checkout Session (`cs_live_…`, hosted URL on checkout.stripe.com, $19.00 line item, metadata bound) — live authentication and session parameters accepted by Stripe.
+2. `complete` on the open session returned the honest "has not completed yet" error.
+3. The session was expired via the Stripe API; `complete` then settled the purchase as FAILED — the real expired-session path works.
+4. A second session was begun; a checkout.session.completed event signed with the configured webhook secret (Stripe HMAC scheme) was verified by the REAL Stripe SDK (`constructEventAsync`) and settled the purchase as paid; a forged signature was rejected by the SDK with Stripe's own error. `complete` then fulfilled WITHOUT re-polling: license, one-time UNLK code, signed receipt, and a real `BRY-NFET-SX-VAULT-V2` buyer vault (mode `share`).
+5. Both live sessions were expired afterward; the Trend dashboard holds no actionable objects.
+
+Also fixed: `/api/health` hardcoded `payments: "mock"` — it now reports the active provider.
+
+Remaining unexercised, by definition: a human completing the hosted page with a real card (creates a real charge). Recommendation stands: do that one purchase at go-live on a My Digital-branded Stripe account.
+
+Validation: full suite re-run after the health fix — 149 tests, typecheck, build all green.

@@ -18,6 +18,8 @@ export interface CreateAppOptions {
   adminToken?: string;
   /** When set, non-/api GETs serve this static directory with SPA fallback. */
   staticRoot?: string;
+  /** Reported by /api/health; defaults to "mock". */
+  paymentsProvider?: string;
 }
 
 const STATIC_TYPES: Record<string, string> = {
@@ -62,7 +64,7 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   });
 
   app.get("/api/health", (c) =>
-    c.json({ ok: true, envelope: QEV_VAULT_SCHEMA, payments: "mock" })
+    c.json({ ok: true, envelope: QEV_VAULT_SCHEMA, payments: options.paymentsProvider ?? "mock" })
   );
 
   app.get("/api/state", async (c) => c.json(await service.getState()));
