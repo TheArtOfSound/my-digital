@@ -25,11 +25,22 @@ import type {
 
 /**
  * Issuer record persisted for verification. Only the public key is stored;
- * private signing keys must never enter the marketplace database.
+ * private signing keys must never enter the marketplace database unsealed.
  */
 export interface StoredIssuerRecord {
   name: string;
   publicKeyB64: string;
+  createdAt: string;
+}
+
+/**
+ * A secret sealed under the server master key (XChaCha20-Poly1305) before it
+ * reaches the database. The store never sees plaintext secrets; sealing and
+ * opening happen in the server keystore.
+ */
+export interface SealedSecretRecord {
+  nonceB64: string;
+  sealedB64: string;
   createdAt: string;
 }
 
@@ -62,6 +73,21 @@ export interface MarketplaceStore {
 
   putLockedPayload(lockedAssetId: LockedAssetId, payload: Uint8Array): Promise<void>;
   getLockedPayload(lockedAssetId: LockedAssetId): Promise<Uint8Array | null>;
+
+  putCustodySecret(lockedAssetId: LockedAssetId, secret: SealedSecretRecord): Promise<void>;
+  getCustodySecret(lockedAssetId: LockedAssetId): Promise<SealedSecretRecord | null>;
+
+  putIssuerSecret(issuerName: string, secret: SealedSecretRecord): Promise<void>;
+  getIssuerSecret(issuerName: string): Promise<SealedSecretRecord | null>;
+
+  putBuyerLockedPayload(
+    licenseId: LicenseId,
+    payload: Uint8Array,
+    payloadHash: string
+  ): Promise<void>;
+  getBuyerLockedPayload(
+    licenseId: LicenseId
+  ): Promise<{ payload: Uint8Array; payloadHash: string } | null>;
 
   insertListing(listing: Listing): Promise<void>;
   getListing(id: ListingId): Promise<Listing | null>;

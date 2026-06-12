@@ -199,3 +199,32 @@ Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (103 tests: 43 core, 30 
 Next expected action:
 
 - Stage 6 fingerprint/trace layer (manifest-level fingerprinting with honest evidence levels), or the thin API server over `@my-digital/store` to move the web app off localStorage and give the QEV adapter real server-side key custody — whichever Bryan prioritizes.
+
+## 2026-06-11 API server + real custody pass (Stage 7 groundwork)
+
+Added `apps/server` (Hono on Node, port 8787) and rewired the web app from browser localStorage to the server API. The visible product now runs on real QEV cryptography end to end.
+
+Key custody, the real-deal part:
+
+- `Keystore` (`apps/server/src/keystore.ts`): a 32-byte master key from `MYDIGITAL_MASTER_KEY_B64` or an auto-generated `data/master-key.b64` file (chmod 600 — the local-dev stand-in for a KMS/HSM; that swap is the production hardening point). Secrets are sealed with XChaCha20-Poly1305 and AAD-bound to their record (`custody:<lockedAssetId>`, `issuer:<name>`), so a sealed blob cannot be replayed for a different record.
+- Custody passphrases from `lock()` are sealed before they touch the database (`custody_secrets` table). The issuer's Ed25519 private key is sealed the same way (`issuer_secrets`); the `issuers` table remains public-key-only.
+- Checkout opens the sealed custody secret, mints the buyer vault via `wrapForCredential`, persists only the encrypted result (`buyer_locked_payloads`), and returns the raw unlock code exactly once. Service tests assert the raw code appears nowhere in a full store dump.
+
+Local-first unlock, the lane:
+
+- The server has NO unlock endpoint. Buyers download the encrypted vault (`GET /api/licenses/:id/vault`) and decrypt in the browser — libsodium loads as a lazy chunk only on the unlock/verify pages, so the main bundle actually shrank. License verification (Ed25519) also runs client-side against the issuer public key. After purchase, credentials and plaintext never touch the server. The unlock page also takes a downloaded `.vault.json` file directly for a fully offline path.
+- Consequence stated honestly: redemption tracking is not possible with local unlock. `unlock_codes` records prove issuance (hash only), not use.
+
+API surface: `/api/health`, `/api/state`, `/api/issuer`, `POST /api/creator`, `POST /api/listings` (payload as base64, 2 MB dev cap), `POST /api/checkout` (mock payment adapter; declined outcome supported), `GET /api/licenses/:id/vault`, `GET /api/locked-assets/:id/payload`, `POST /api/licenses/:id/revoke`, `GET /api/licenses/:id/verify`, `GET /api/receipts/:id/bundle`, `POST /api/admin/reset`. Errors map to `{error}` JSON. Vite proxies `/api` to 8787; `pnpm server` + `pnpm dev` run the pair.
+
+Store additions: `custody_secrets`, `issuer_secrets`, `buyer_locked_payloads` tables (migration `0001` committed), matching interface methods on both implementations, conformance suite extended (36 store tests).
+
+Browser-verified end to end (real crypto, quick KDF preset): creator setup -> server-side QEV lock -> listing -> paid checkout (code shown once, vault + receipt-bundle downloads) -> local unlock in the browser (license PASS, vault unlock PASS, plaintext matches) -> wrong code fails with `VAULT_WRAP_AUTH_FAILED` -> revoke blocks unlock with `LICENSE_REVOKED` before the vault is even fetched -> tamper simulation fails integrity and structure checks -> declined payment stores a failed purchase and issues nothing -> receipt verifies client-side (hash, signature, both bindings).
+
+Server tests (11) cover keystore sealing/AAD-binding/file permissions, custody-sealed listing, paid checkout with local-unlock simulation and wrong-code refusal, no-raw-code-in-store, declined checkout, revocation, reset with issuer rotation, issuer persistence across process restarts (new checkout works in the second process), and HTTP endpoints.
+
+Validation: `pnpm typecheck`, `pnpm build`, `pnpm test` (120 tests across 6 packages), `pnpm demo`, `pnpm demo:qev`, `pnpm db:seed`/`db:verify` unaffected.
+
+Next expected action:
+
+- Stage 6 fingerprint/trace layer: every buyer vault is already unique and carries its license id sealed inside, so "this exact leaked vault was issued to license X" is an honest hash-match claim — build the trace check on top. Or continue Stage 7: buyer library/auth, Stripe adapter behind the payment contract, deployment to the proposed `mydigital.imagineqira.com`.

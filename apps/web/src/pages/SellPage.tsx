@@ -100,8 +100,9 @@ export function SellPage() {
       <section className="panel">
         <h2>Sell a locked digital product</h2>
         <p>
-          The file is hashed (real SHA-256), described in a signed-format manifest, and locked with
-          the <strong>demo envelope adapter</strong> — clearly labeled, not production cryptography.
+          The file is hashed (SHA-256), described in a manifest, and locked server-side into a real{" "}
+          <strong>QEV Vault V2</strong> envelope (Argon2id + XChaCha20-Poly1305). The custody secret
+          is sealed under the server master key before it touches the database.
         </p>
         <form className="form" onSubmit={onSubmit}>
           <label className="field">
@@ -221,7 +222,7 @@ export function SellPage() {
             <div>
               <dt>Locked asset</dt>
               <dd className="mono">
-                {result.lockedAsset.id} · {result.lockedAsset.envelopeFormat} (DEMO ONLY)
+                {result.lockedAsset.id} · {result.lockedAsset.envelopeFormat}
               </dd>
             </div>
           </dl>

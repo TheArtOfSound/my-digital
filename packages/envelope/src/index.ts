@@ -35,6 +35,7 @@ export {
   type QevKdfPreset,
   type QevVaultV2EnvelopeAdapterOptions
 } from "./qev-vault-v2";
+export { compareRecordedHashes } from "./hash-comparison";
 
 const DEMO_WARNING = "DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING";
 

@@ -6,7 +6,11 @@ import type {
 } from "@my-digital/types";
 import { useState } from "react";
 import { VerificationResultView } from "../components/VerificationResultView";
-import { useMarketplace, type PastedReceiptVerification } from "../lib/marketplace";
+import {
+  useMarketplace,
+  type LockedAssetVerification,
+  type PastedReceiptVerification
+} from "../lib/marketplace";
 
 function useAsyncVerify() {
   const [busy, setBusy] = useState(false);
@@ -42,7 +46,7 @@ export function VerifyPage() {
 
   const [lockedAssetId, setLockedAssetId] = useState("");
   const [simulateTamper, setSimulateTamper] = useState(false);
-  const [envelopeResult, setEnvelopeResult] = useState<VerificationResult | null>(null);
+  const [envelopeResult, setEnvelopeResult] = useState<LockedAssetVerification | null>(null);
   const envelopeVerify = useAsyncVerify();
 
   const lockedAssetOptions = state.lockedAssets.map((lockedAsset) => {
@@ -145,9 +149,9 @@ export function VerifyPage() {
       </section>
 
       <section className="panel">
-        <h2>Buyer license</h2>
+        <h2>Buyer license (verified by the API server)</h2>
         {state.licenses.length === 0 ? (
-          <p>No licenses in this browser yet.</p>
+          <p>No licenses yet.</p>
         ) : (
           <div className="form">
             <label className="field">
@@ -230,7 +234,16 @@ export function VerifyPage() {
           </div>
         )}
         {envelopeResult && (
-          <VerificationResultView title="Locked package" result={envelopeResult} />
+          <div className="verify-stack">
+            <VerificationResultView
+              title="Locked package integrity (recorded hashes)"
+              result={envelopeResult.integrity}
+            />
+            <VerificationResultView
+              title="Vault structure (BRY-NFET-SX-VAULT-V2)"
+              result={envelopeResult.structure}
+            />
+          </div>
         )}
       </section>
     </>

@@ -6,6 +6,7 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "pnpm --filter @my-digital/web dev",
+    "server": "pnpm --filter @my-digital/server dev",
     "demo": "pnpm --filter @my-digital/lifecycle-demo demo",
     "demo:qev": "pnpm --filter @my-digital/lifecycle-demo demo:qev",
     "db:seed": "pnpm --filter @my-digital/lifecycle-demo seed",

@@ -22,7 +22,7 @@ import type {
   Revocation,
   UnlockCode
 } from "@my-digital/types";
-import type { MarketplaceStore, StoredIssuerRecord } from "./interface";
+import type { MarketplaceStore, SealedSecretRecord, StoredIssuerRecord } from "./interface";
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -31,6 +31,9 @@ function clone<T>(value: T): T {
 /** In-memory store for tests and ephemeral demos. Not persistent. */
 export class MemoryMarketplaceStore implements MarketplaceStore {
   private issuers = new Map<string, StoredIssuerRecord>();
+  private custodySecrets = new Map<string, SealedSecretRecord>();
+  private issuerSecrets = new Map<string, SealedSecretRecord>();
+  private buyerLockedPayloads = new Map<string, { payload: Uint8Array; payloadHash: string }>();
   private creators = new Map<string, Creator>();
   private buyers = new Map<string, Buyer>();
   private assets = new Map<string, Asset>();
@@ -133,6 +136,36 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
     return found ? new Uint8Array(found) : null;
   }
 
+  async putCustodySecret(lockedAssetId: LockedAssetId, secret: SealedSecretRecord): Promise<void> {
+    this.custodySecrets.set(lockedAssetId, clone(secret));
+  }
+  async getCustodySecret(lockedAssetId: LockedAssetId): Promise<SealedSecretRecord | null> {
+    const found = this.custodySecrets.get(lockedAssetId);
+    return found ? clone(found) : null;
+  }
+
+  async putIssuerSecret(issuerName: string, secret: SealedSecretRecord): Promise<void> {
+    this.issuerSecrets.set(issuerName, clone(secret));
+  }
+  async getIssuerSecret(issuerName: string): Promise<SealedSecretRecord | null> {
+    const found = this.issuerSecrets.get(issuerName);
+    return found ? clone(found) : null;
+  }
+
+  async putBuyerLockedPayload(
+    licenseId: LicenseId,
+    payload: Uint8Array,
+    payloadHash: string
+  ): Promise<void> {
+    this.buyerLockedPayloads.set(licenseId, { payload: new Uint8Array(payload), payloadHash });
+  }
+  async getBuyerLockedPayload(
+    licenseId: LicenseId
+  ): Promise<{ payload: Uint8Array; payloadHash: string } | null> {
+    const found = this.buyerLockedPayloads.get(licenseId);
+    return found ? { payload: new Uint8Array(found.payload), payloadHash: found.payloadHash } : null;
+  }
+
   async insertListing(listing: Listing): Promise<void> {
     this.listings.set(listing.id, clone(listing));
   }
@@ -207,6 +240,9 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   }
 
   async reset(): Promise<void> {
+    this.custodySecrets.clear();
+    this.issuerSecrets.clear();
+    this.buyerLockedPayloads.clear();
     this.issuers.clear();
     this.creators.clear();
     this.buyers.clear();

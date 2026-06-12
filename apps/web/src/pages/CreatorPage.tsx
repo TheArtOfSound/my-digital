@@ -75,8 +75,9 @@ export function CreatorPage() {
           </div>
         </dl>
         <div className="notice">
-          DEMO ONLY: the issuer private key is stored unprotected in this browser's localStorage so
-          the demo survives reloads. Production issuance must never do this.
+          The issuer's Ed25519 private key lives on the API server, sealed under the server master
+          key — it is never stored in plaintext and never sent to this browser. Custody secrets for
+          locked assets are sealed the same way.
         </div>
         {error && <p className="panel-error">{error}</p>}
       </section>
@@ -215,9 +216,14 @@ export function CreatorPage() {
                     <button
                       className="btn btn-ghost btn-small"
                       type="button"
-                      onClick={() =>
-                        downloadJson(`${receipt.id}.json`, actions.makeReceiptBundle(receipt.id))
-                      }
+                      onClick={() => {
+                        void actions
+                          .getReceiptBundle(receipt.id)
+                          .then((bundle) => downloadJson(`${receipt.id}.json`, bundle))
+                          .catch((cause) =>
+                            setError(cause instanceof Error ? cause.message : String(cause))
+                          );
+                      }}
                     >
                       Download bundle
                     </button>
@@ -255,15 +261,25 @@ export function CreatorPage() {
 
       <section className="panel danger-zone">
         <h2>Danger zone</h2>
-        <p>Deletes all demo records and the demo issuer key from this browser, then reloads.</p>
+        <p>
+          Deletes every record in the server database and bootstraps a fresh issuer key. Existing
+          receipts and licenses will no longer verify against the new issuer.
+        </p>
         <button
           className="btn btn-danger"
           type="button"
           onClick={() => {
-            if (window.confirm("Delete all demo data in this browser?")) actions.resetDemo();
+            if (window.confirm("Delete all marketplace data on the server?")) {
+              setError(null);
+              void actions
+                .resetDemo()
+                .catch((cause) =>
+                  setError(cause instanceof Error ? cause.message : String(cause))
+                );
+            }
           }}
         >
-          Reset demo data
+          Reset marketplace data
         </button>
       </section>
     </>

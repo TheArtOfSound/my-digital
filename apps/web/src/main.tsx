@@ -26,12 +26,21 @@ function Layout() {
           <NavLink to="/verify">Verify</NavLink>
           <NavLink to="/creator">Creator</NavLink>
         </div>
-        <span className="pill pill-demo">DEMO MODE</span>
+        <span className="pill pill-demo">DEV · MOCK PAYMENTS</span>
       </nav>
 
       {status === "loading" && (
         <section className="panel">
-          <p>Preparing the demo marketplace…</p>
+          <p>Connecting to the marketplace API…</p>
+        </section>
+      )}
+      {status === "offline" && (
+        <section className="panel panel-error-block">
+          <h2>API server not running</h2>
+          <p>
+            The marketplace API is not reachable. Start it in another terminal with{" "}
+            <span className="mono">pnpm server</span>, then reload this page.
+          </p>
         </section>
       )}
       {status === "unsupported" && (
@@ -44,9 +53,11 @@ function Layout() {
 
       <footer className="footer">
         <p>
-          Demo build. Envelope locking is simulated and labeled; SHA-256 hashes and Ed25519 issuer
-          signatures are real. All records stay in this browser. Decrypted output is never
-          persisted. This product does not claim to make piracy impossible.
+          Dev build. Assets are locked server-side into real QEV Vault V2 envelopes
+          (BRY-NFET-SX-VAULT-V2, Argon2id + XChaCha20-Poly1305); custody secrets are sealed under
+          the server master key. Unlock and decryption run locally in this browser — codes and
+          plaintext are never sent to the server after purchase. Payments are mocked. This product
+          does not claim to make piracy impossible.
         </p>
       </footer>
     </div>

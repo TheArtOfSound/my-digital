@@ -171,6 +171,8 @@ Exit criteria:
 
 ## Stage 7 — Creator marketplace beta
 
+Status: in progress. Server backbone done (2026-06-11): `apps/server` (Hono + SQLite store) locks with the real QEV adapter, seals custody and issuer secrets under a master key, mints buyer vaults at paid checkout, and serves the web app — which now runs against the API with local-first, in-browser unlock. Remaining for beta: buyer accounts/auth, Stripe adapter, deployment, support/recovery docs.
+
 Goal: actual seller/buyer product.
 
 Required:

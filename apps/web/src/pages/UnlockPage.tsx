@@ -3,7 +3,11 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { VerificationResultView } from "../components/VerificationResultView";
 import { downloadBytes } from "../lib/format";
-import { useMarketplace, type UnlockOutcome } from "../lib/marketplace";
+import {
+  useMarketplace,
+  type LocalVaultUnlockOutcome,
+  type UnlockOutcome
+} from "../lib/marketplace";
 
 function plaintextPreview(bytes: Uint8Array, mimeType: string): string | null {
   if (!mimeType.startsWith("text/")) return null;
@@ -22,6 +26,12 @@ export function UnlockPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<UnlockOutcome | null>(null);
+
+  const [vaultFile, setVaultFile] = useState<File | null>(null);
+  const [fileCode, setFileCode] = useState("");
+  const [fileBusy, setFileBusy] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileOutcome, setFileOutcome] = useState<LocalVaultUnlockOutcome | null>(null);
 
   const licenseOptions = state.licenses.map((license) => {
     const asset = state.assets.find((entry) => entry.id === license.assetId);
@@ -52,14 +62,32 @@ export function UnlockPage() {
     }
   }
 
+  async function onFileSubmit(event: FormEvent) {
+    event.preventDefault();
+    setFileBusy(true);
+    setFileError(null);
+    setFileOutcome(null);
+    try {
+      if (!vaultFile) throw new Error("Choose a vault file.");
+      const bytes = new Uint8Array(await vaultFile.arrayBuffer());
+      const result = await actions.unlockVaultBytes({ bytes, rawCode: fileCode.trim() });
+      setFileOutcome(result);
+    } catch (cause) {
+      setFileError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setFileBusy(false);
+    }
+  }
+
   return (
     <>
       <section className="panel">
         <h2>Unlock a purchased product</h2>
         <p>
-          Unlock runs three checks first — license signature and bindings, unlock code hash, and
-          locked payload integrity. If any check fails, no plaintext is returned. Decrypted output
-          is never persisted by the demo.
+          Decryption runs locally in this browser — Argon2id and XChaCha20-Poly1305 via libsodium.
+          Your unlock code and the decrypted file never leave this page; the server only delivers
+          the encrypted vault. License verification (Ed25519) also runs here, against the issuer
+          public key.
         </p>
         {licenseOptions.length === 0 ? (
           <p>
@@ -91,7 +119,7 @@ export function UnlockPage() {
             </label>
             {error && <p className="panel-error">{error}</p>}
             <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? "Verifying…" : "Verify and unlock"}
+              {busy ? "Deriving key and decrypting…" : "Verify and unlock locally"}
             </button>
           </form>
         )}
@@ -101,10 +129,10 @@ export function UnlockPage() {
         <>
           {outcome.plaintext ? (
             <section className="panel panel-success">
-              <h2>Unlocked</h2>
+              <h2>Unlocked locally</h2>
               <p>
                 {outcome.fileName} · {outcome.mimeType} · {outcome.plaintext.byteLength} bytes —
-                matches the purchased asset version.
+                decrypted in this browser; nothing was sent to the server.
               </p>
               {(() => {
                 const preview = plaintextPreview(outcome.plaintext, outcome.mimeType);
@@ -125,7 +153,7 @@ export function UnlockPage() {
             <section className="panel panel-error-block">
               <h2>Unlock blocked</h2>
               <p>
-                Verification failed, so no plaintext was returned. The structured results below
+                Verification failed, so no plaintext was produced. The structured results below
                 state exactly which check failed.
               </p>
             </section>
@@ -133,16 +161,67 @@ export function UnlockPage() {
           <section className="panel">
             <h2>Verification results</h2>
             <div className="verify-stack">
-              <VerificationResultView title="Buyer license" result={outcome.verifications.license} />
-              <VerificationResultView title="Unlock code" result={outcome.verifications.unlockCode} />
-              <VerificationResultView title="Locked envelope" result={outcome.verifications.envelope} />
+              <VerificationResultView title="Buyer license (verified in this browser)" result={outcome.verifications.license} />
               {outcome.verifications.unlock && (
-                <VerificationResultView title="Unlock operation" result={outcome.verifications.unlock} />
+                <VerificationResultView title="Vault unlock (QEV Vault V2, local)" result={outcome.verifications.unlock} />
               )}
             </div>
           </section>
         </>
       )}
+
+      <section className="panel">
+        <h2>Unlock from a vault file</h2>
+        <p>
+          Fully offline path: pick a downloaded <span className="mono">.vault.json</span> file and
+          enter the code. No marketplace records are involved — the vault and credential carry
+          everything needed.
+        </p>
+        <form className="form" onSubmit={onFileSubmit}>
+          <label className="field">
+            Vault file
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={(event) => setVaultFile(event.target.files?.[0] ?? null)}
+            />
+          </label>
+          <label className="field">
+            Unlock code
+            <input
+              className="mono"
+              value={fileCode}
+              onChange={(event) => setFileCode(event.target.value)}
+              placeholder="UNLK-XXXX-XXXX-XXXX-XXXX"
+              required
+            />
+          </label>
+          {fileError && <p className="panel-error">{fileError}</p>}
+          <button className="btn btn-primary" disabled={fileBusy} type="submit">
+            {fileBusy ? "Deriving key and decrypting…" : "Unlock file locally"}
+          </button>
+        </form>
+        {fileOutcome && (
+          <>
+            {fileOutcome.plaintext && (
+              <p className="hint">
+                Decrypted {fileOutcome.plaintext.byteLength} bytes.{" "}
+                <button
+                  className="btn btn-ghost btn-small"
+                  type="button"
+                  onClick={() =>
+                    fileOutcome.plaintext &&
+                    downloadBytes("unlocked-file", "application/octet-stream", fileOutcome.plaintext)
+                  }
+                >
+                  Download
+                </button>
+              </p>
+            )}
+            <VerificationResultView title="Vault unlock (local file)" result={fileOutcome.verification} />
+          </>
+        )}
+      </section>
     </>
   );
 }

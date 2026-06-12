@@ -1,7 +1,7 @@
 import type { ListingId } from "@my-digital/types";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
-import { copyToClipboard, downloadJson, formatPrice } from "../lib/format";
+import { copyToClipboard, downloadBytes, downloadJson, formatPrice } from "../lib/format";
 import { useMarketplace, type CheckoutResult } from "../lib/marketplace";
 
 export function CheckoutPage() {
@@ -21,7 +21,7 @@ export function CheckoutPage() {
       <section className="panel">
         <h2>Listing not found</h2>
         <p>
-          This listing does not exist in this browser's demo records. <Link to="/">Back home</Link>.
+          This listing does not exist in the marketplace records. <Link to="/">Back home</Link>.
         </p>
       </section>
     );
@@ -54,8 +54,8 @@ export function CheckoutPage() {
         <p>
           The mock provider reported a failed payment. Purchase{" "}
           <span className="mono">{result.purchase.id}</span> was recorded with status{" "}
-          <strong>{result.purchase.status}</strong>. No license was issued, no unlock code
-          exists, and no receipt was generated.
+          <strong>{result.purchase.status}</strong>. No license was issued, no unlock code exists,
+          no vault was minted, and no receipt was generated.
         </p>
         <div className="hero-actions">
           <button className="btn btn-primary" type="button" onClick={() => setResult(null)}>
@@ -88,6 +88,10 @@ export function CheckoutPage() {
               <dd className="mono">{bundle.license.id}</dd>
             </div>
             <div>
+              <dt>Your encrypted vault (QEV Vault V2)</dt>
+              <dd className="mono">hash {bundle.buyerVaultHash.slice(0, 32)}…</dd>
+            </div>
+            <div>
               <dt>Receipt</dt>
               <dd className="mono">{bundle.receipt.id}</dd>
             </div>
@@ -97,8 +101,8 @@ export function CheckoutPage() {
         <section className="panel panel-warning">
           <h2>Your unlock code — shown once</h2>
           <p>
-            Only the SHA-256 hash of this code is stored. If you lose the code, the demo cannot
-            recover it.
+            Only the SHA-256 hash of this code is stored. The code decrypts your vault locally; it
+            is never sent to the server. If you lose it, it cannot be recovered.
           </p>
           <p className="unlock-code mono">{bundle.rawUnlockCode}</p>
           <div className="hero-actions">
@@ -114,24 +118,45 @@ export function CheckoutPage() {
             <button
               className="btn btn-ghost"
               type="button"
-              onClick={() => downloadJson(`${bundle.license.id}.json`, bundle.license)}
+              onClick={() => {
+                void actions
+                  .fetchBuyerVault(bundle.license.id)
+                  .then((bytes) =>
+                    downloadBytes(`${bundle.license.id}.vault.json`, "application/json", bytes)
+                  )
+                  .catch((cause) =>
+                    setError(cause instanceof Error ? cause.message : String(cause))
+                  );
+              }}
             >
-              Download license JSON
+              Download locked vault
             </button>
             <button
               className="btn btn-ghost"
               type="button"
-              onClick={() =>
-                downloadJson(`${bundle.receipt.id}.json`, actions.makeReceiptBundle(bundle.receipt.id))
-              }
+              onClick={() => {
+                void actions
+                  .getReceiptBundle(bundle.receipt.id)
+                  .then((receiptBundle) =>
+                    downloadJson(`${bundle.receipt.id}.json`, receiptBundle)
+                  )
+                  .catch((cause) =>
+                    setError(cause instanceof Error ? cause.message : String(cause))
+                  );
+              }}
             >
               Download receipt bundle
             </button>
           </div>
+          {error && <p className="panel-error">{error}</p>}
         </section>
 
         <section className="panel">
           <h2>Next steps</h2>
+          <p>
+            Unlock runs entirely in your browser (or with the upstream qev CLI for text assets).
+            The vault is a standard BRY-NFET-SX-VAULT-V2 document.
+          </p>
           <div className="hero-actions">
             <Link className="btn btn-primary" to="/unlock">
               Unlock the product
@@ -153,9 +178,9 @@ export function CheckoutPage() {
       </p>
       <div className="notice">
         Checkout goes through the payment adapter boundary: a checkout session is created, the
-        mock provider reports a paid or failed event, and a license exists only after a paid
-        confirmation. No card fields, no real charge. A Stripe adapter arrives later behind the
-        same interface.
+        mock provider reports a paid or failed event, and only a paid confirmation mints your
+        license and encrypted vault. No card fields, no real charge. A Stripe adapter arrives
+        later behind the same interface.
       </div>
       <form className="form" onSubmit={onSubmit}>
         <label className="field">

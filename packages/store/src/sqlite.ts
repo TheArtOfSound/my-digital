@@ -30,7 +30,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { MarketplaceStore, StoredIssuerRecord } from "./interface";
+import type { MarketplaceStore, SealedSecretRecord, StoredIssuerRecord } from "./interface";
 import * as schema from "./schema";
 
 const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
@@ -387,6 +387,78 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? new Uint8Array(row.payload) : null;
   }
 
+  async putCustodySecret(lockedAssetId: LockedAssetId, secret: SealedSecretRecord): Promise<void> {
+    this.db
+      .insert(schema.custodySecrets)
+      .values({ lockedAssetId, ...secret })
+      .onConflictDoUpdate({
+        target: schema.custodySecrets.lockedAssetId,
+        set: { nonceB64: secret.nonceB64, sealedB64: secret.sealedB64, createdAt: secret.createdAt }
+      })
+      .run();
+  }
+  async getCustodySecret(lockedAssetId: LockedAssetId): Promise<SealedSecretRecord | null> {
+    const row = this.db
+      .select()
+      .from(schema.custodySecrets)
+      .where(eq(schema.custodySecrets.lockedAssetId, lockedAssetId))
+      .get();
+    return row
+      ? { nonceB64: row.nonceB64, sealedB64: row.sealedB64, createdAt: row.createdAt }
+      : null;
+  }
+
+  async putIssuerSecret(issuerName: string, secret: SealedSecretRecord): Promise<void> {
+    this.db
+      .insert(schema.issuerSecrets)
+      .values({ issuerName, ...secret })
+      .onConflictDoUpdate({
+        target: schema.issuerSecrets.issuerName,
+        set: { nonceB64: secret.nonceB64, sealedB64: secret.sealedB64, createdAt: secret.createdAt }
+      })
+      .run();
+  }
+  async getIssuerSecret(issuerName: string): Promise<SealedSecretRecord | null> {
+    const row = this.db
+      .select()
+      .from(schema.issuerSecrets)
+      .where(eq(schema.issuerSecrets.issuerName, issuerName))
+      .get();
+    return row
+      ? { nonceB64: row.nonceB64, sealedB64: row.sealedB64, createdAt: row.createdAt }
+      : null;
+  }
+
+  async putBuyerLockedPayload(
+    licenseId: LicenseId,
+    payload: Uint8Array,
+    payloadHash: string
+  ): Promise<void> {
+    this.db
+      .insert(schema.buyerLockedPayloads)
+      .values({
+        licenseId,
+        payload: Buffer.from(payload),
+        payloadHash,
+        createdAt: new Date().toISOString()
+      })
+      .onConflictDoUpdate({
+        target: schema.buyerLockedPayloads.licenseId,
+        set: { payload: Buffer.from(payload), payloadHash }
+      })
+      .run();
+  }
+  async getBuyerLockedPayload(
+    licenseId: LicenseId
+  ): Promise<{ payload: Uint8Array; payloadHash: string } | null> {
+    const row = this.db
+      .select()
+      .from(schema.buyerLockedPayloads)
+      .where(eq(schema.buyerLockedPayloads.licenseId, licenseId))
+      .get();
+    return row ? { payload: new Uint8Array(row.payload), payloadHash: row.payloadHash } : null;
+  }
+
   async insertListing(listing: Listing): Promise<void> {
     this.db
       .insert(schema.listings)
@@ -505,6 +577,9 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
 
   async reset(): Promise<void> {
     // Delete children before parents to respect foreign keys.
+    this.db.delete(schema.custodySecrets).run();
+    this.db.delete(schema.issuerSecrets).run();
+    this.db.delete(schema.buyerLockedPayloads).run();
     this.db.delete(schema.revocations).run();
     this.db.delete(schema.fingerprints).run();
     this.db.delete(schema.proofReceipts).run();

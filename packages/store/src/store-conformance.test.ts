@@ -257,6 +257,39 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.getLockedPayload("locked_missing" as LockedAssetId)).toBeNull();
     });
 
+    it("round-trips sealed custody secrets (upsert included)", async () => {
+      await store.putCustodySecret(lockedAsset.id, {
+        nonceB64: "nonce-1",
+        sealedB64: "sealed-1",
+        createdAt: NOW
+      });
+      await store.putCustodySecret(lockedAsset.id, {
+        nonceB64: "nonce-2",
+        sealedB64: "sealed-2",
+        createdAt: NOW
+      });
+      expect(await store.getCustodySecret(lockedAsset.id)).toEqual({
+        nonceB64: "nonce-2",
+        sealedB64: "sealed-2",
+        createdAt: NOW
+      });
+      expect(await store.getCustodySecret("locked_missing" as LockedAssetId)).toBeNull();
+    });
+
+    it("round-trips sealed issuer secrets", async () => {
+      await store.putIssuerSecret("test-issuer", {
+        nonceB64: "issuer-nonce",
+        sealedB64: "issuer-sealed",
+        createdAt: NOW
+      });
+      expect(await store.getIssuerSecret("test-issuer")).toEqual({
+        nonceB64: "issuer-nonce",
+        sealedB64: "issuer-sealed",
+        createdAt: NOW
+      });
+      expect(await store.getIssuerSecret("missing")).toBeNull();
+    });
+
     it("round-trips listings including license terms JSON", async () => {
       await store.insertListing(listing);
       expect(await store.getListing(listing.id)).toEqual(listing);
@@ -296,6 +329,15 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.listProofReceipts()).toEqual([receipt]);
     });
 
+    it("round-trips buyer locked payloads with their hash", async () => {
+      await store.putBuyerLockedPayload(license.id, payloadBytes, "9a".repeat(32));
+      const restored = await store.getBuyerLockedPayload(license.id);
+      expect(restored).not.toBeNull();
+      expect([...(restored?.payload ?? new Uint8Array())]).toEqual([...payloadBytes]);
+      expect(restored?.payloadHash).toBe("9a".repeat(32));
+      expect(await store.getBuyerLockedPayload("license_missing" as LicenseId)).toBeNull();
+    });
+
     it("round-trips fingerprints and revocations", async () => {
       await store.insertFingerprint(fingerprint);
       await store.insertRevocation(revocation);
@@ -313,6 +355,9 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.listProofReceipts()).toEqual([]);
       expect(await store.getIssuer("test-issuer")).toBeNull();
       expect(await store.getLockedPayload(lockedAsset.id)).toBeNull();
+      expect(await store.getCustodySecret(lockedAsset.id)).toBeNull();
+      expect(await store.getIssuerSecret("test-issuer")).toBeNull();
+      expect(await store.getBuyerLockedPayload(license.id)).toBeNull();
     });
   });
 }

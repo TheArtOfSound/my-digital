@@ -192,6 +192,33 @@ export const fingerprints = sqliteTable("fingerprints", {
   createdAt: text("created_at").notNull()
 });
 
+export const custodySecrets = sqliteTable("custody_secrets", {
+  lockedAssetId: text("locked_asset_id")
+    .primaryKey()
+    .references(() => lockedAssets.id),
+  nonceB64: text("nonce_b64").notNull(),
+  sealedB64: text("sealed_b64").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const issuerSecrets = sqliteTable("issuer_secrets", {
+  issuerName: text("issuer_name")
+    .primaryKey()
+    .references(() => issuers.name),
+  nonceB64: text("nonce_b64").notNull(),
+  sealedB64: text("sealed_b64").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const buyerLockedPayloads = sqliteTable("buyer_locked_payloads", {
+  licenseId: text("license_id")
+    .primaryKey()
+    .references(() => licenses.id),
+  payload: blob("payload", { mode: "buffer" }).notNull(),
+  payloadHash: text("payload_hash").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
 export const revocations = sqliteTable("revocations", {
   id: text("id").primaryKey(),
   targetType: text("target_type").notNull(),

@@ -17,9 +17,9 @@ export function HomePage() {
           buyer-specific unlock licenses, tamper verification, and proof-of-purchase receipts.
         </p>
         <div className="notice">
-          <strong>Demo build:</strong> envelope locking uses a clearly labeled demo adapter — not
-          production cryptography. SHA-256 hashing and Ed25519 issuer signatures are real. All
-          state lives in this browser.
+          <strong>Dev build:</strong> assets are locked into real QEV Vault V2 envelopes
+          (Argon2id + XChaCha20-Poly1305) with custody secrets sealed server-side. Unlock and
+          decryption run locally in your browser. Payments are mocked — no real charges.
         </div>
         <div className="hero-actions">
           <Link className="btn btn-primary" to="/sell">
@@ -43,7 +43,7 @@ export function HomePage() {
       </section>
 
       <section className="panel">
-        <h2>Demo listings ({state.listings.length})</h2>
+        <h2>Listings ({state.listings.length})</h2>
         {state.listings.length === 0 ? (
           <p>
             Nothing is listed yet. <Link to="/sell">Lock and list the first product</Link> to run
