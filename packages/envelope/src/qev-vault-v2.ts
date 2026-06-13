@@ -18,14 +18,19 @@ import type {
   WrapForCredentialInput,
   WrapForCredentialResult
 } from "@my-digital/types";
-import _sodium from "libsodium-wrappers-sumo";
 import { compareRecordedHashes } from "./hash-comparison";
+import {
+  b64urlDecode,
+  b64urlEncode,
+  sodiumCryptoProvider,
+  type QevCryptoProvider
+} from "./qev-crypto";
 
 /**
  * Production envelope adapter implementing upstream QEV Vault V2 semantics
  * (TheArtOfSound/qev-desktop, schema BRY-NFET-SX-VAULT-V2):
  *
- * - Argon2id (crypto_pwhash, ALG_ARGON2ID13) derives a wrapping key from the
+ * - Argon2id (ALG_ARGON2ID13 parameters) derives a wrapping key from the
  *   credential; the wrapping key encrypts a random 32-byte vault key; the
  *   vault key encrypts the plaintext (XChaCha20-Poly1305, 24-byte nonces).
  * - All binary fields are base64url without padding.
@@ -40,9 +45,11 @@ import { compareRecordedHashes } from "./hash-comparison";
  * as a canonical JSON wrapper, so the vault document itself stays fully
  * upstream-compatible while the binding remains tamper-evident via AEAD.
  *
+ * The crypto backend is pluggable (libsodium by default; @noble on runtimes
+ * without WASM instantiation, e.g. Cloudflare Workers) — see qev-crypto.ts.
+ *
  * What is NOT production-grade here: custody key handling. lock() returns
  * the custody passphrase to the caller, which must treat it as a secret.
- * Server-side key custody arrives with the API server stage.
  */
 
 export const QEV_VAULT_SCHEMA = "BRY-NFET-SX-VAULT-V2";
@@ -60,8 +67,15 @@ const MAX_OPSLIMIT = 10;
 const MIN_MEMLIMIT = 8 * 1024 * 1024;
 const MAX_MEMLIMIT = 256 * 1024 * 1024;
 
-/** Upstream strength presets (docs/VAULT_FORMAT.md). */
+/**
+ * Upstream strength presets (docs/VAULT_FORMAT.md) plus "edge": the upstream
+ * minimum memlimit, for CPU-budgeted runtimes. Honest rationale: My Digital
+ * credentials are random high-entropy secrets (custody passphrases 192 bits,
+ * unlock codes ~79 bits), so KDF cost is defense-in-depth here, not the
+ * primary barrier the way it is for human passphrases.
+ */
 export const QEV_KDF_PRESETS = {
+  edge: { opslimit: 1, memlimit: 8 * 1024 * 1024 },
   quick: { opslimit: 1, memlimit: 32 * 1024 * 1024 },
   strong: { opslimit: 4, memlimit: 96 * 1024 * 1024 },
   vault: { opslimit: 6, memlimit: 128 * 1024 * 1024 }
@@ -91,21 +105,6 @@ interface MyDigitalInnerEnvelope {
   payload_b64: string;
 }
 
-type Sodium = typeof _sodium;
-
-async function getSodium(): Promise<Sodium> {
-  await _sodium.ready;
-  return _sodium;
-}
-
-function b64urlEncode(sodium: Sodium, bytes: Uint8Array): string {
-  return sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING);
-}
-
-function b64urlDecode(sodium: Sodium, text: string): Uint8Array {
-  return sodium.from_base64(text, sodium.base64_variants.URLSAFE_NO_PADDING);
-}
-
 /** AAD over the same fixed metadata subset as upstream buildAADV2. */
 function buildAad(vault: QevVaultDocument): Uint8Array {
   return utf8Bytes(
@@ -126,18 +125,21 @@ function buildAad(vault: QevVaultDocument): Uint8Array {
   );
 }
 
-async function encryptVault(input: {
-  plaintext: Uint8Array;
-  password: string;
-  mode: "self" | "share";
-  opslimit: number;
-  memlimit: number;
-}): Promise<QevVaultDocument> {
-  const sodium = await getSodium();
-  const salt = sodium.randombytes_buf(SALT_BYTES);
-  const wrapNonce = sodium.randombytes_buf(NONCE_BYTES);
-  const contentNonce = sodium.randombytes_buf(NONCE_BYTES);
-  const vaultKey = sodium.randombytes_buf(KEY_BYTES);
+async function encryptVault(
+  crypto: QevCryptoProvider,
+  input: {
+    plaintext: Uint8Array;
+    password: string;
+    mode: "self" | "share";
+    opslimit: number;
+    memlimit: number;
+  }
+): Promise<QevVaultDocument> {
+  await crypto.ready();
+  const salt = crypto.randomBytes(SALT_BYTES);
+  const wrapNonce = crypto.randomBytes(NONCE_BYTES);
+  const contentNonce = crypto.randomBytes(NONCE_BYTES);
+  const vaultKey = crypto.randomBytes(KEY_BYTES);
 
   const vault: QevVaultDocument = {
     schema: QEV_VAULT_SCHEMA,
@@ -148,46 +150,35 @@ async function encryptVault(input: {
       algorithm: QEV_KDF_ALG,
       opslimit: input.opslimit,
       memlimit: input.memlimit,
-      salt: b64urlEncode(sodium, salt)
+      salt: b64urlEncode(salt)
     },
-    wrap: { algorithm: QEV_AEAD_ALG, nonce: b64urlEncode(sodium, wrapNonce), wrapped_key: "" },
+    wrap: { algorithm: QEV_AEAD_ALG, nonce: b64urlEncode(wrapNonce), wrapped_key: "" },
     content: {
       algorithm: QEV_AEAD_ALG,
-      nonce: b64urlEncode(sodium, contentNonce),
+      nonce: b64urlEncode(contentNonce),
       ciphertext: ""
     }
   };
   const aad = buildAad(vault);
 
-  const wrapKey = sodium.crypto_pwhash(
-    KEY_BYTES,
+  const wrapKey = crypto.argon2id(
     utf8Bytes(input.password),
     salt,
     input.opslimit,
     input.memlimit,
-    sodium.crypto_pwhash_ALG_ARGON2ID13
+    KEY_BYTES
   );
   try {
-    vault.wrap.wrapped_key = b64urlEncode(
-      sodium,
-      sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(vaultKey, aad, null, wrapNonce, wrapKey)
-    );
+    vault.wrap.wrapped_key = b64urlEncode(crypto.aeadEncrypt(vaultKey, aad, wrapNonce, wrapKey));
   } finally {
-    sodium.memzero(wrapKey);
+    crypto.wipe(wrapKey);
   }
   try {
     vault.content.ciphertext = b64urlEncode(
-      sodium,
-      sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-        input.plaintext,
-        aad,
-        null,
-        contentNonce,
-        vaultKey
-      )
+      crypto.aeadEncrypt(input.plaintext, aad, contentNonce, vaultKey)
     );
   } finally {
-    sodium.memzero(vaultKey);
+    crypto.wipe(vaultKey);
   }
   return vault;
 }
@@ -315,11 +306,14 @@ function parseVaultBytes(bytes: Uint8Array): QevVaultDocument | VaultFailure {
   return parsed as QevVaultDocument;
 }
 
-async function decryptVault(input: {
-  vault: QevVaultDocument;
-  password: string;
-}): Promise<Uint8Array | VaultFailure> {
-  const sodium = await getSodium();
+async function decryptVault(
+  crypto: QevCryptoProvider,
+  input: {
+    vault: QevVaultDocument;
+    password: string;
+  }
+): Promise<Uint8Array | VaultFailure> {
+  await crypto.ready();
   const { vault } = input;
 
   let salt: Uint8Array;
@@ -328,11 +322,11 @@ async function decryptVault(input: {
   let contentNonce: Uint8Array;
   let contentCt: Uint8Array;
   try {
-    salt = b64urlDecode(sodium, vault.kdf.salt);
-    wrapNonce = b64urlDecode(sodium, vault.wrap.nonce);
-    wrappedKey = b64urlDecode(sodium, vault.wrap.wrapped_key);
-    contentNonce = b64urlDecode(sodium, vault.content.nonce);
-    contentCt = b64urlDecode(sodium, vault.content.ciphertext);
+    salt = b64urlDecode(vault.kdf.salt);
+    wrapNonce = b64urlDecode(vault.wrap.nonce);
+    wrappedKey = b64urlDecode(vault.wrap.wrapped_key);
+    contentNonce = b64urlDecode(vault.content.nonce);
+    contentCt = b64urlDecode(vault.content.ciphertext);
   } catch {
     return {
       failure: {
@@ -359,24 +353,17 @@ async function decryptVault(input: {
   }
 
   const aad = buildAad(vault);
-  const wrapKey = sodium.crypto_pwhash(
-    KEY_BYTES,
+  const wrapKey = crypto.argon2id(
     utf8Bytes(input.password),
     salt,
     vault.kdf.opslimit,
     vault.kdf.memlimit,
-    sodium.crypto_pwhash_ALG_ARGON2ID13
+    KEY_BYTES
   );
 
   let vaultKey: Uint8Array;
   try {
-    vaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-      null,
-      wrappedKey,
-      aad,
-      wrapNonce,
-      wrapKey
-    );
+    vaultKey = crypto.aeadDecrypt(wrappedKey, aad, wrapNonce, wrapKey);
   } catch {
     return {
       failure: {
@@ -387,17 +374,11 @@ async function decryptVault(input: {
       }
     };
   } finally {
-    sodium.memzero(wrapKey);
+    crypto.wipe(wrapKey);
   }
 
   try {
-    return sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-      null,
-      contentCt,
-      aad,
-      contentNonce,
-      vaultKey
-    );
+    return crypto.aeadDecrypt(contentCt, aad, contentNonce, vaultKey);
   } catch {
     return {
       failure: {
@@ -408,28 +389,32 @@ async function decryptVault(input: {
       }
     };
   } finally {
-    sodium.memzero(vaultKey);
+    crypto.wipe(vaultKey);
   }
 }
 
 export interface QevVaultV2EnvelopeAdapterOptions {
-  /** Argon2id strength preset; matches upstream presets. Default "strong". */
+  /** Argon2id strength preset; matches upstream presets plus "edge". Default "strong". */
   preset?: QevKdfPreset;
+  /** Crypto backend; defaults to libsodium. Workers should pass nobleCryptoProvider. */
+  crypto?: QevCryptoProvider;
 }
 
 export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
   private readonly opslimit: number;
   private readonly memlimit: number;
+  private readonly crypto: QevCryptoProvider;
 
   constructor(options: QevVaultV2EnvelopeAdapterOptions = {}) {
     const preset = QEV_KDF_PRESETS[options.preset ?? "strong"];
     this.opslimit = preset.opslimit;
     this.memlimit = preset.memlimit;
+    this.crypto = options.crypto ?? sodiumCryptoProvider;
   }
 
   async lock(input: EnvelopeLockInput): Promise<EnvelopeLockResult> {
-    const sodium = await getSodium();
-    const custodyPassphrase = b64urlEncode(sodium, sodium.randombytes_buf(24));
+    await this.crypto.ready();
+    const custodyPassphrase = b64urlEncode(this.crypto.randomBytes(24));
     const contentSha256 = await sha256Hex(input.plaintext);
     const binding = {
       asset_version_id: input.assetVersionId as string,
@@ -440,9 +425,9 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
     const inner: MyDigitalInnerEnvelope = {
       kind: MYDIGITAL_INNER_KIND,
       binding,
-      payload_b64: b64urlEncode(sodium, input.plaintext)
+      payload_b64: b64urlEncode(input.plaintext)
     };
-    const vault = await encryptVault({
+    const vault = await encryptVault(this.crypto, {
       plaintext: utf8Bytes(stableJson(inner)),
       password: custodyPassphrase,
       mode: "self",
@@ -457,19 +442,21 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
       lockedPayload,
       lockedPayloadHash: await sha256Hex(lockedPayload),
       metadataHash: await sha256Hex(utf8Bytes(stableJson(binding))),
-      qevEngineVersion: `qev-vault-v2/libsodium-${ENGINE_VERSION}`,
+      qevEngineVersion: `qev-vault-v2/${this.crypto.name}-${ENGINE_VERSION}`,
       developmentOnly: false,
       keyMaterialB64: custodyPassphrase
     };
   }
 
   async wrapForCredential(input: WrapForCredentialInput): Promise<WrapForCredentialResult> {
-    const sodium = await getSodium();
     const parsed = parseVaultBytes(input.lockedPayload);
     if (isFailure(parsed)) {
       throw new Error(`Cannot wrap for credential: ${parsed.failure.detail}`);
     }
-    const innerBytes = await decryptVault({ vault: parsed, password: input.keyMaterialB64 });
+    const innerBytes = await decryptVault(this.crypto, {
+      vault: parsed,
+      password: input.keyMaterialB64
+    });
     if (isFailure(innerBytes)) {
       throw new Error(`Cannot wrap for credential: ${innerBytes.failure.detail}`);
     }
@@ -486,7 +473,7 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
       ...inner,
       binding: { ...inner.binding, license_id: input.licenseId as string }
     };
-    const buyerVault = await encryptVault({
+    const buyerVault = await encryptVault(this.crypto, {
       plaintext: utf8Bytes(stableJson(buyerInner)),
       password: input.credential,
       mode: "share",
@@ -494,7 +481,7 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
       memlimit: this.memlimit
     });
     const buyerLockedPayload = utf8Bytes(JSON.stringify(buyerVault));
-    sodium.memzero(innerBytes);
+    this.crypto.wipe(innerBytes);
     return {
       buyerLockedPayload,
       buyerLockedPayloadHash: await sha256Hex(buyerLockedPayload)
@@ -512,7 +499,10 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
     const parsed = parseVaultBytes(input.lockedPayload);
     if (isFailure(parsed)) return failedUnlock(parsed.failure);
 
-    const plaintext = await decryptVault({ vault: parsed, password: input.licenseMaterial });
+    const plaintext = await decryptVault(this.crypto, {
+      vault: parsed,
+      password: input.licenseMaterial
+    });
     if (isFailure(plaintext)) return failedUnlock(plaintext.failure);
 
     const checksPassed: VerificationCheck[] = [
@@ -539,10 +529,9 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
       inner = null;
     }
 
-    const sodium = await getSodium();
     if (inner) {
       try {
-        payload = b64urlDecode(sodium, inner.payload_b64);
+        payload = b64urlDecode(inner.payload_b64);
       } catch {
         return failedUnlock({
           code: "INNER_PAYLOAD_DECODE_FAILED",
@@ -561,7 +550,8 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
       checksPassed.push({
         code: "INNER_CONTENT_HASH_MATCH",
         label: "Sealed content hash match",
-        detail: "SHA-256 of the decrypted payload matches the hash sealed inside the authenticated envelope."
+        detail:
+          "SHA-256 of the decrypted payload matches the hash sealed inside the authenticated envelope."
       });
       checksPassed.push({
         code: "INNER_BINDING_PRESENT",
@@ -611,7 +601,6 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
    * KDF parameters, wrap and content sections, and field lengths.
    */
   async verifyVaultStructure(lockedPayload: Uint8Array): Promise<VerificationResult> {
-    const sodium = await getSodium();
     const checksPassed: VerificationCheck[] = [];
     const checksFailed: VerificationCheck[] = [];
 
@@ -632,11 +621,11 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
         }
       );
       try {
-        const salt = b64urlDecode(sodium, parsed.kdf.salt);
-        const wrapNonce = b64urlDecode(sodium, parsed.wrap.nonce);
-        const wrappedKey = b64urlDecode(sodium, parsed.wrap.wrapped_key);
-        const contentNonce = b64urlDecode(sodium, parsed.content.nonce);
-        const ciphertext = b64urlDecode(sodium, parsed.content.ciphertext);
+        const salt = b64urlDecode(parsed.kdf.salt);
+        const wrapNonce = b64urlDecode(parsed.wrap.nonce);
+        const wrappedKey = b64urlDecode(parsed.wrap.wrapped_key);
+        const contentNonce = b64urlDecode(parsed.content.nonce);
+        const ciphertext = b64urlDecode(parsed.content.ciphertext);
         if (
           salt.length === SALT_BYTES &&
           wrapNonce.length === NONCE_BYTES &&
@@ -678,7 +667,8 @@ export class QevVaultV2EnvelopeAdapter implements BuyerWrappingEnvelopeAdapter {
         {
           code: "DECRYPTION_NOT_ATTEMPTED",
           label: "Decryption",
-          detail: "Structural verification does not attempt decryption; AEAD integrity is checked at unlock."
+          detail:
+            "Structural verification does not attempt decryption; AEAD integrity is checked at unlock."
         }
       ],
       assumptions: [],

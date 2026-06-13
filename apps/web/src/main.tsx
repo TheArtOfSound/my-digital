@@ -21,6 +21,7 @@ function Layout() {
       <nav className="nav">
         <Link className="brand" to="/">
           My Digital
+          <small>An Imagine Qira Company</small>
         </Link>
         <div className="nav-links">
           <NavLink to="/sell">Sell</NavLink>
@@ -32,7 +33,7 @@ function Layout() {
           <NavLink to="/trace">Trace</NavLink>
           <NavLink to="/creator">Creator</NavLink>
         </div>
-        <span className="pill pill-demo">DEV · MOCK PAYMENTS</span>
+        <span className="pill pill-demo">Preview — Mock Payments</span>
       </nav>
 
       {status === "loading" && (
@@ -58,12 +59,17 @@ function Layout() {
       {status === "ready" && <Outlet />}
 
       <footer className="footer">
+        <p className="footer-brand">My Digital — An Imagine Qira Company</p>
         <p>
-          Dev build. Assets are locked server-side into real QEV Vault V2 envelopes
-          (BRY-NFET-SX-VAULT-V2, Argon2id + XChaCha20-Poly1305); custody secrets are sealed under
-          the server master key. Unlock and decryption run locally in this browser — codes and
-          plaintext are never sent to the server after purchase. Payments are mocked. This product
-          does not claim to make piracy impossible.
+          Every asset sold here is locked into a QEV envelope (Qira Encryption Vault, schema
+          BRY-NFET-SX-VAULT-V2, Argon2id and XChaCha20-Poly1305). Custody secrets are sealed under
+          the server master key. Unlock and decryption run locally in your browser; unlock codes
+          and decrypted files are never sent to the server after purchase.
+        </p>
+        <p>
+          Preview build: payments are simulated and no charges occur. This product improves
+          controlled access, proof of purchase, and traceability; it does not claim to make piracy
+          impossible.
         </p>
       </footer>
     </div>

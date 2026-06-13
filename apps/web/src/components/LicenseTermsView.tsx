@@ -15,11 +15,11 @@ export function LicenseTermsView({ terms }: { terms: LicenseTerms }) {
     <ul className="terms-list">
       {TERM_LABELS.map(({ key, label }) => (
         <li key={key} className={terms[key] ? "term-yes" : "term-no"}>
-          <span className="term-mark">{terms[key] ? "✓" : "✕"}</span> {label}
+          <span className="term-mark">{terms[key] ? "Allowed" : "Not allowed"}</span> {label}
         </li>
       ))}
       <li className="term-yes">
-        <span className="term-mark">#</span> {terms.seatCount} seat
+        <span className="term-mark">{terms.seatCount}</span> Licensed seat
         {terms.seatCount === 1 ? "" : "s"}
       </li>
     </ul>

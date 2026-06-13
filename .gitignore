@@ -18,3 +18,8 @@ coverage
 *.sqlite-shm
 *.db
 apps/*/data/
+
+# Cloudflare / wrangler
+.wrangler/
+apps/worker/worker-configuration.d.ts
+.dev.vars

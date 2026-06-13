@@ -7,7 +7,7 @@ import {
   verifyUnlockCode
 } from "@my-digital/core";
 import { DemoEnvelopeAdapter } from "@my-digital/envelope";
-import { openSqliteStore } from "@my-digital/store";
+import { openSqliteStore } from "@my-digital/store/node";
 import type { VerificationResult } from "@my-digital/types";
 import { existsSync } from "node:fs";
 import { defaultDbPath } from "./db-path";

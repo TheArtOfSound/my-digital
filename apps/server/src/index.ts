@@ -1,14 +1,12 @@
 import { serve } from "@hono/node-server";
 import { MockPaymentAdapter } from "@my-digital/core";
 import { QevVaultV2EnvelopeAdapter, type QevKdfPreset } from "@my-digital/envelope";
-import { openSqliteStore } from "@my-digital/store";
+import { createApp, Keystore, MarketplaceService } from "@my-digital/server-core";
+import { openSqliteStore } from "@my-digital/store/node";
 import type { PaymentAdapter } from "@my-digital/types";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createApp } from "./app";
-import { Keystore } from "./keystore";
-import { MarketplaceService } from "./service";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(here, "..", "data");
@@ -17,7 +15,9 @@ const keyFilePath = path.join(dataDir, "master-key.b64");
 const port = Number(process.env.PORT ?? 8787);
 const presetEnv = process.env.MYDIGITAL_KDF_PRESET;
 const preset: QevKdfPreset =
-  presetEnv === "quick" || presetEnv === "strong" || presetEnv === "vault" ? presetEnv : "strong";
+  presetEnv === "edge" || presetEnv === "quick" || presetEnv === "strong" || presetEnv === "vault"
+    ? presetEnv
+    : "strong";
 const publicUrl = process.env.MYDIGITAL_PUBLIC_URL ?? "http://localhost:5173";
 const paymentsMode = process.env.MYDIGITAL_PAYMENTS === "stripe" ? "stripe" : "mock";
 

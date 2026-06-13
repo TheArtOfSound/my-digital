@@ -15,6 +15,8 @@
   "dependencies": {
     "@my-digital/core": "workspace:*",
     "@my-digital/types": "workspace:*",
+    "@noble/ciphers": "^1.2.1",
+    "@noble/hashes": "^1.7.1",
     "libsodium-wrappers-sumo": "^0.7.15"
   },
   "devDependencies": {

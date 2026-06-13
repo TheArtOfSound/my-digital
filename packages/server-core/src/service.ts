@@ -47,7 +47,9 @@ import type {
 } from "@my-digital/types";
 import { Keystore, ensureServerIssuer, type ServerIssuer } from "./keystore";
 
-const MAX_PAYLOAD_BYTES = 2_000_000;
+// 1 MB: keeps buyer vaults (payload base64url + envelope overhead) under
+// Cloudflare D1's 2 MB row limit and matches the upstream CLI's 1 MiB cap.
+const MAX_PAYLOAD_BYTES = 1_000_000;
 
 export const RECEIPT_BUNDLE_KIND = "MYDIGITAL-RECEIPT-BUNDLE-V1";
 
@@ -180,7 +182,7 @@ export class MarketplaceService {
       throw new Error("The product content is empty.");
     }
     if (input.payload.byteLength > MAX_PAYLOAD_BYTES) {
-      throw new Error("Keep files under 2 MB in the dev instance.");
+      throw new Error("Keep files under 1 MB in this instance.");
     }
 
     let asset = createAsset({

@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "my-digital",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "my-digital",
+      "database_id": "97051f63-cb33-4026-8eb5-1a36257164a2",
+      "migrations_dir": "d1-migrations"
+    }
+  ],
+  "vars": {
+    "MYDIGITAL_KDF_PRESET": "edge",
+    "MYDIGITAL_PAYMENTS": "mock",
+    "MYDIGITAL_PUBLIC_URL": "https://mydigital.imagineqira.com"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "routes": [
+    {
+      "pattern": "mydigital.imagineqira.com",
+      "custom_domain": true
+    }
+  ]
+}

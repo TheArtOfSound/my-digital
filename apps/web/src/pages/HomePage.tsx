@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { formatPrice } from "../lib/format";
 import { useMarketplace } from "../lib/marketplace";
 
-const lifecycle = ["CREATE", "LOCK", "LIST", "BUY", "LICENSE", "UNLOCK", "VERIFY", "TRACE"];
+const lifecycle = ["Create", "Lock", "List", "Buy", "License", "Unlock", "Verify", "Trace"];
 
 export function HomePage() {
   const { state } = useMarketplace();
@@ -10,17 +10,14 @@ export function HomePage() {
   return (
     <>
       <section className="hero">
-        <p className="eyebrow">QEV commerce extension</p>
-        <h1>Sell digital products as locked, verifiable assets.</h1>
+        <p className="eyebrow">Imagine Qira · QEV-Secured Commerce</p>
+        <h1>A marketplace where every digital product is sold as a locked, verifiable asset.</h1>
         <p className="subhead">
-          My Digital is the QEV-powered commerce primitive for encrypted digital goods,
-          buyer-specific unlock licenses, tamper verification, and proof-of-purchase receipts.
+          My Digital packages each product into a QEV envelope. Every purchase issues a
+          buyer-specific license, a one-time unlock code, and a signed receipt that verifies at
+          its printed address — and unlocking happens on the buyer's own machine, not our
+          servers.
         </p>
-        <div className="notice">
-          <strong>Dev build:</strong> assets are locked into real QEV Vault V2 envelopes
-          (Argon2id + XChaCha20-Poly1305) with custody secrets sealed server-side. Unlock and
-          decryption run locally in your browser. Payments are mocked — no real charges.
-        </div>
         <div className="hero-actions">
           <Link className="btn btn-primary" to="/sell">
             Lock and list a product
@@ -29,10 +26,14 @@ export function HomePage() {
             Creator dashboard
           </Link>
         </div>
+        <div className="notice">
+          Preview build: envelope locking, licensing, receipts, and trace are fully operational
+          on QEV Vault V2 cryptography. Payments are simulated — no charges occur.
+        </div>
       </section>
 
       <section className="panel">
-        <h2>Core lifecycle</h2>
+        <h2>How a sale works</h2>
         <div className="lifecycle">
           {lifecycle.map((step) => (
             <span className="step" key={step}>
@@ -40,6 +41,11 @@ export function HomePage() {
             </span>
           ))}
         </div>
+        <p style={{ marginTop: "14px" }}>
+          The lifecycle is the product: assets are locked before listing, licenses are issued only
+          after confirmed payment, and every artifact — license, receipt, vault — can be
+          independently verified.
+        </p>
       </section>
 
       <section className="panel">
@@ -64,25 +70,34 @@ export function HomePage() {
 
       <section className="grid">
         <article className="card">
-          <h3>Creator promise</h3>
-          <p>Lock files into QEV-style asset envelopes and sell them with clear license terms.</p>
+          <h3>For creators</h3>
+          <p>
+            Files are locked into QEV asset envelopes with machine-readable license terms. Custody
+            secrets are sealed server-side; leaked copies trace back to the license they were
+            issued under.
+          </p>
         </article>
         <article className="card">
-          <h3>Buyer promise</h3>
-          <p>Receive a buyer-specific unlock credential and a verifiable purchase receipt.</p>
+          <h3>For buyers</h3>
+          <p>
+            You receive your own encrypted vault, an unlock code shown exactly once, and a signed
+            receipt. Decryption runs locally — your code and your files never touch our servers.
+          </p>
         </article>
         <article className="card">
-          <h3>Trust promise</h3>
-          <p>Verify asset integrity, license binding, and receipt status without vague security theater.</p>
+          <h3>For verification</h3>
+          <p>
+            Licenses, receipts, and packages verify cryptographically, online or offline. Every
+            result states what was checked, what was not, and what is assumed.
+          </p>
         </article>
       </section>
 
       <section className="panel muted">
-        <h2>Build rule</h2>
+        <h2>What we claim, plainly</h2>
         <p>
-          This product improves controlled access, proof, and traceability. It must remain honest
-          about what it verifies, what it does not verify, and what remains outside the
-          application boundary.
+          This platform improves controlled access, proof of purchase, license verification, and
+          leak traceability. It does not claim to make piracy impossible, and it never will.
         </p>
       </section>
     </>

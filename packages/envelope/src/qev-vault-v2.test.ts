@@ -2,6 +2,7 @@ import { decryptVaultV2, encryptVaultV2 } from "@bryan237l/qev-cli";
 import { bytesEqual, utf8Bytes } from "@my-digital/core";
 import type { AssetVersionId, LicenseId } from "@my-digital/types";
 import { describe, expect, it } from "vitest";
+import { nobleCryptoProvider } from "./qev-crypto";
 import { MYDIGITAL_INNER_KIND, QEV_VAULT_SCHEMA, QevVaultV2EnvelopeAdapter } from "./qev-vault-v2";
 
 // "quick" preset keeps Argon2id costs test-friendly; format is identical
@@ -186,6 +187,92 @@ describe("QevVaultV2EnvelopeAdapter.verifyVaultStructure", () => {
     expect(result.checksFailed.map((check) => check.code)).toContain(
       "VAULT_KDF_PARAMS_OUT_OF_RANGE"
     );
+  });
+});
+
+describe("noble crypto backend (Workers runtime)", () => {
+  const noble = new QevVaultV2EnvelopeAdapter({ preset: "edge", crypto: nobleCryptoProvider });
+
+  it("locks, wraps, and unlocks with pure-JS crypto", async () => {
+    const lockResult = await noble.lock(lockInput);
+    expect(lockResult.developmentOnly).toBe(false);
+    expect(lockResult.qevEngineVersion).toContain("noble");
+    const wrap = await noble.wrapForCredential({
+      lockedPayload: lockResult.lockedPayload,
+      keyMaterialB64: lockResult.keyMaterialB64 ?? "",
+      credential: CODE,
+      licenseId: LICENSE_ID
+    });
+    const unlocked = await noble.unlock({
+      lockedPayload: wrap.buyerLockedPayload,
+      licenseMaterial: CODE
+    });
+    expect(unlocked.verification.status).toBe("pass");
+    expect(bytesEqual(unlocked.plaintext, PLAINTEXT)).toBe(true);
+
+    const wrong = await noble.unlock({
+      lockedPayload: wrap.buyerLockedPayload,
+      licenseMaterial: "UNLK-WRON-GCOD-EFOR-SURE"
+    });
+    expect(wrong.verification.status).toBe("fail");
+  });
+
+  it("is byte-compatible with the sodium backend in both directions", async () => {
+    const sodium = new QevVaultV2EnvelopeAdapter({ preset: "edge" });
+
+    // sodium-locked custody vault wrapped by noble, unlocked by sodium.
+    const sodiumLock = await sodium.lock(lockInput);
+    const nobleWrap = await noble.wrapForCredential({
+      lockedPayload: sodiumLock.lockedPayload,
+      keyMaterialB64: sodiumLock.keyMaterialB64 ?? "",
+      credential: CODE,
+      licenseId: LICENSE_ID
+    });
+    const sodiumUnlock = await sodium.unlock({
+      lockedPayload: nobleWrap.buyerLockedPayload,
+      licenseMaterial: CODE
+    });
+    expect(sodiumUnlock.verification.status).toBe("pass");
+    expect(bytesEqual(sodiumUnlock.plaintext, PLAINTEXT)).toBe(true);
+
+    // noble-locked custody vault unlocked by sodium with the custody key.
+    const nobleLock = await noble.lock(lockInput);
+    const crossUnlock = await sodium.unlock({
+      lockedPayload: nobleLock.lockedPayload,
+      licenseMaterial: nobleLock.keyMaterialB64 ?? ""
+    });
+    expect(crossUnlock.verification.status).toBe("pass");
+  });
+
+  it("noble-minted buyer vaults decrypt with the upstream qev CLI", async () => {
+    const lockResult = await noble.lock(lockInput);
+    const wrap = await noble.wrapForCredential({
+      lockedPayload: lockResult.lockedPayload,
+      keyMaterialB64: lockResult.keyMaterialB64 ?? "",
+      credential: CODE,
+      licenseId: LICENSE_ID
+    });
+    const vault = JSON.parse(new TextDecoder().decode(wrap.buyerLockedPayload)) as object;
+    const innerText = (await decryptVaultV2({ vault, password: CODE })) as string;
+    const inner = JSON.parse(innerText) as { kind: string; binding: { license_id?: string } };
+    expect(inner.kind).toBe(MYDIGITAL_INNER_KIND);
+    expect(inner.binding.license_id).toBe(LICENSE_ID);
+  });
+
+  it("upstream-encrypted vaults unlock with the noble backend", async () => {
+    const upstreamVault = (await encryptVaultV2({
+      plaintext: "upstream to noble",
+      password: "a long enough upstream phrase",
+      mode: "self",
+      opslimit: 1,
+      memlimit: 32 * 1024 * 1024
+    })) as object;
+    const result = await noble.unlock({
+      lockedPayload: utf8Bytes(JSON.stringify(upstreamVault)),
+      licenseMaterial: "a long enough upstream phrase"
+    });
+    expect(result.verification.status).toBe("pass");
+    expect(new TextDecoder().decode(result.plaintext)).toBe("upstream to noble");
   });
 });
 

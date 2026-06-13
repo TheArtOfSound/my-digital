@@ -1,4 +1,43 @@
-# Deployment Plan — mydigital.imagineqira.com
+# Deployment — mydigital.imagineqira.com
+
+## LIVE NOW (2026-06-12)
+
+The full stack is deployed and verified on Cloudflare:
+
+- **URL:** https://my-digital.bryanleonard237.workers.dev
+- **Worker:** `my-digital` (Cloudflare account `eaa59df7…`), Hono app + SPA assets in one Worker.
+- **Database:** D1 `my-digital` (`97051f63-cb33-4026-8eb5-1a36257164a2`), schema applied from `apps/worker/d1-migrations/0001_init.sql`.
+- **Crypto on the edge:** the QEV Vault V2 adapter runs on the pure-JS `@noble` backend (Argon2id + XChaCha20-Poly1305) at the `edge` preset — libsodium's WASM can't init on Workers. Byte-compatibility with libsodium and the upstream qev CLI is enforced by the envelope test suite, and was reproven live: a vault locked on the Worker, stored in D1, downloaded, and decrypted by the upstream `@bryan237l/qev-cli` with the buyer's code recovered the exact plaintext.
+- **Secrets set (never in the repo):** `MYDIGITAL_MASTER_KEY_B64` (32-byte master key sealing custody + issuer secrets) and `MYDIGITAL_ADMIN_TOKEN` (gates `/api/admin/reset`).
+- **Payments:** `mock` (var `MYDIGITAL_PAYMENTS`). Flip to `stripe` by setting that var plus the `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` secrets.
+- **Verified live:** health, creator → edge lock → listing → checkout → buyer vault download → local decrypt, trace (exact-vault-match), SPA serving, `/verify/:receiptId` deep link (SPA fallback 200), admin reset gated (401). Test data was wiped afterward; the issuer keypair is preserved.
+
+### Redeploy / operate
+
+```bash
+pnpm --filter @my-digital/web build          # refresh static assets
+cd apps/worker && wrangler deploy            # deploy Worker + assets
+wrangler d1 migrations apply my-digital --remote   # apply new migrations
+wrangler tail my-digital                     # live logs
+wrangler secret put MYDIGITAL_ADMIN_TOKEN    # rotate the admin token
+```
+
+When new store migrations are generated (`pnpm --filter @my-digital/store generate`), regenerate the D1 migration: concatenate `packages/store/drizzle/*.sql` (in order) into a new `apps/worker/d1-migrations/000N_*.sql` and `wrangler d1 migrations apply my-digital --remote`.
+
+## Custom domain: mydigital.imagineqira.com
+
+Not yet attached. `imagineqira.com` is on GoDaddy nameservers (`ns53/54.domaincontrol.com`), not Cloudflare, and a Worker custom domain requires the zone on Cloudflare. Steps (the nameserver change is owner-only and affects the existing imagineqira.com site + email, so migrate records first):
+
+1. Add `imagineqira.com` as a zone in the Cloudflare dashboard (or `POST /zones`). Let Cloudflare scan existing DNS, then **verify every record imported** — especially the apex `A 54.167.112.215`, `www`, and all **MX/TXT (email)** records. A missed MX record means email goes down at cutover.
+2. At GoDaddy, change the nameservers to the two Cloudflare nameservers shown for the zone. Wait for activation.
+3. Uncomment the `routes` block in `apps/worker/wrangler.jsonc` (custom_domain `mydigital.imagineqira.com`) and `wrangler deploy`. Cloudflare issues the TLS cert and routes the hostname to the Worker automatically.
+4. The receipt `verificationUrl` is already `https://mydigital.imagineqira.com/verify/<id>`, so receipts verify at their printed URL once the domain is attached — no data migration.
+
+`market.imagineqira.com` stays reserved per `docs/POSITIONING.md`.
+
+---
+
+# Original plan — mydigital.imagineqira.com
 
 Target domain per `docs/POSITIONING.md`: the app at `mydigital.imagineqira.com`, receipts verifying at `https://mydigital.imagineqira.com/verify/<receiptId>` (the web route exists). This document is the concrete plan; nothing here is deployed yet.
 

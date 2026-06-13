@@ -8,8 +8,6 @@ import type {
   ProofReceiptId,
   PurchaseId
 } from "@my-digital/types";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { Hono } from "hono";
 import type { MarketplaceService } from "./service";
 
@@ -78,8 +76,8 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
 
   app.post("/api/listings", async (c) => {
     const body = await c.req.json<CreateListingBody>();
-    if (typeof body.payloadB64 !== "string" || body.payloadB64.length > 3_000_000) {
-      return c.json({ error: "Payload is missing or exceeds the 2 MB dev limit." }, 413);
+    if (typeof body.payloadB64 !== "string" || body.payloadB64.length > 1_400_000) {
+      return c.json({ error: "Payload is missing or exceeds the 1 MB limit." }, 413);
     }
     const result = await service.createLockedListing({
       title: body.title,
@@ -204,8 +202,13 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   });
 
   if (options.staticRoot !== undefined) {
-    const root = path.resolve(options.staticRoot);
+    const staticRoot = options.staticRoot;
+    // node:fs/node:path are imported lazily so this module loads on Workers,
+    // where static assets are served by the platform's Assets binding instead.
     app.get("*", async (c) => {
+      const { readFile } = await import("node:fs/promises");
+      const path = await import("node:path");
+      const root = path.resolve(staticRoot);
       const requestPath = decodeURIComponent(new URL(c.req.url).pathname);
       if (requestPath.startsWith("/api/")) return c.json({ error: "Not found." }, 404);
       const candidate = path.resolve(path.join(root, requestPath));

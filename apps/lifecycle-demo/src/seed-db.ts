@@ -1,6 +1,6 @@
 import { runLifecycleDemo } from "@my-digital/core";
 import { DemoEnvelopeAdapter } from "@my-digital/envelope";
-import { openSqliteStore } from "@my-digital/store";
+import { openSqliteStore } from "@my-digital/store/node";
 import { defaultDbPath } from "./db-path";
 
 const dbPath = defaultDbPath();

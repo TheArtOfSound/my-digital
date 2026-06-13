@@ -300,3 +300,19 @@ Also fixed: `/api/health` hardcoded `payments: "mock"` — it now reports the ac
 Remaining unexercised, by definition: a human completing the hosted page with a real card (creates a real charge). Recommendation stands: do that one purchase at go-live on a My Digital-branded Stripe account.
 
 Validation: full suite re-run after the health fix — 149 tests, typecheck, build all green.
+
+## 2026-06-12 Cloudflare production pass: Workers + D1, custom domain, redesign
+
+The product is live at https://mydigital.imagineqira.com.
+
+Workers port. `apps/worker` runs the same Hono app on Cloudflare Workers: `@my-digital/server-core` extracted so `apps/server` (Node + better-sqlite3) and the Worker (D1) share createApp/MarketplaceService/Keystore unchanged. `D1MarketplaceStore` shares the Drizzle schema and row mappers with the sqlite store (`packages/store/src/row-mappers.ts`); the better-sqlite3 store moved to the `@my-digital/store/node` subpath so the Worker bundle never touches native modules. Migrations live in `apps/worker/d1-migrations` (concatenated from `packages/store/drizzle`). Assets are served by Workers Assets with SPA fallback; `run_worker_first` keeps `/api/*` on the Worker.
+
+Edge crypto. libsodium cannot instantiate on Workers, so the QEV adapter's crypto backend is pluggable (`packages/envelope/src/qev-crypto.ts`): libsodium remains the Node/browser default; `@noble/hashes` + `@noble/ciphers` (pure JS, audited) run on Workers at the new `edge` KDF preset (Argon2id ops 1 / 8 MiB — the upstream minimum, honest because My Digital credentials are high-entropy random secrets, not human passphrases). Byte-compatibility of noble <-> sodium <-> the published qev CLI is covered by the cross-implementation test suite (24 envelope tests). Secrets (`MYDIGITAL_MASTER_KEY_B64`, `MYDIGITAL_ADMIN_TOKEN`) are Workers secrets; the issuers table still stores public keys only. Payload cap is 1 MB (D1 2 MB row limit, matches the CLI cap).
+
+Domain. imagineqira.com was onboarded to Bryan's Cloudflare account via Chrome with his authorization: 18 records imported and deliberately set to DNS-only for a byte-identical migration (existing site at 54.167.112.215 and all Microsoft 365 mail records — MX, SPF, DMARC, autodiscover, sip/lyncdiscover, SRV — verified intact after cutover); GoDaddy nameservers switched to alla/weston.ns.cloudflare.com (identity OTP read from Gmail); delegation propagated within minutes; the Worker custom domain `mydigital.imagineqira.com` attached and certificates issued. Receipts printed since Stage 4 already carry this exact verification URL, and `/verify/<receiptId>` resolves on it now.
+
+Redesign. Full restyle to a professional light identity per Bryan's direction: white ground, black accents, square corners, serif headlines, ruled tables, restrained functional status colors only, Imagine Qira + QEV branding in masthead and footer, no emojis (license terms now read Allowed/Not allowed). Same class names throughout — components untouched except masthead, footer, home page, and license-terms copy.
+
+Validation: 153 tests across 7 packages; typecheck/build green; live checks on the custom domain (health, state with real D1 records); existing-site and mail DNS verified post-migration.
+
+Remaining for full production: real-card Stripe purchase on a My Digital Stripe account (`MYDIGITAL_PAYMENTS=stripe` + secrets), buyer auth, and optionally enabling the Cloudflare proxy on the legacy site records.

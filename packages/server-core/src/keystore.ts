@@ -5,74 +5,80 @@ import {
   importIssuerPublicKey,
   utf8Bytes
 } from "@my-digital/core";
+import { sodiumCryptoProvider, type QevCryptoProvider } from "@my-digital/envelope";
 import type { MarketplaceStore, SealedSecretRecord } from "@my-digital/store";
-import _sodium from "libsodium-wrappers-sumo";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 
 const MASTER_KEY_BYTES = 32;
 const NONCE_BYTES = 24;
-
-async function getSodium(): Promise<typeof _sodium> {
-  await _sodium.ready;
-  return _sodium;
-}
 
 /**
  * Server keystore. Holds the master key and seals/opens secrets with
  * XChaCha20-Poly1305, binding each secret to its purpose via AAD so a sealed
  * blob cannot be replayed for a different record.
  *
- * The master key comes from MYDIGITAL_MASTER_KEY_B64 or a local key file
- * (created on first run, chmod 600). The key file is the local-dev stand-in
- * for a real KMS/HSM; that swap is the production hardening point.
+ * The crypto backend is pluggable (libsodium on Node; @noble on Workers).
+ * The master key comes from raw bytes (Workers secret), the
+ * MYDIGITAL_MASTER_KEY_B64 env var, or a local key file (Node dev — the
+ * stand-in for a real KMS/HSM, which is the production hardening point).
  */
 export class Keystore {
-  private constructor(private readonly masterKey: Uint8Array) {}
+  private constructor(
+    private readonly masterKey: Uint8Array,
+    private readonly crypto: QevCryptoProvider
+  ) {}
 
-  static async open(options: { keyFilePath: string }): Promise<Keystore> {
-    await getSodium();
+  /** Build directly from a 32-byte key (Workers: from a Workers secret). */
+  static async fromKeyBytes(key: Uint8Array, crypto: QevCryptoProvider): Promise<Keystore> {
+    if (key.byteLength !== MASTER_KEY_BYTES) {
+      throw new Error(`Master key must be ${MASTER_KEY_BYTES} bytes, got ${key.byteLength}.`);
+    }
+    await crypto.ready();
+    return new Keystore(key, crypto);
+  }
+
+  static async fromBase64Key(keyB64: string, crypto: QevCryptoProvider): Promise<Keystore> {
+    return Keystore.fromKeyBytes(base64ToBytes(keyB64), crypto);
+  }
+
+  /** Node entry: env var, else a chmod-600 key file (created on first run). */
+  static async open(options: {
+    keyFilePath: string;
+    crypto?: QevCryptoProvider;
+  }): Promise<Keystore> {
+    const crypto = options.crypto ?? sodiumCryptoProvider;
+    await crypto.ready();
     const fromEnv = process.env.MYDIGITAL_MASTER_KEY_B64;
     if (fromEnv !== undefined && fromEnv.length > 0) {
-      const key = base64ToBytes(fromEnv);
-      if (key.byteLength !== MASTER_KEY_BYTES) {
-        throw new Error(
-          `MYDIGITAL_MASTER_KEY_B64 must decode to ${MASTER_KEY_BYTES} bytes, got ${key.byteLength}.`
-        );
-      }
-      return new Keystore(key);
+      return Keystore.fromBase64Key(fromEnv, crypto);
     }
+    // node:fs is imported lazily so this module loads on non-Node runtimes.
+    const { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } = await import(
+      "node:fs"
+    );
+    const { dirname } = await import("node:path");
     if (existsSync(options.keyFilePath)) {
       const key = base64ToBytes(readFileSync(options.keyFilePath, "utf8").trim());
       if (key.byteLength !== MASTER_KEY_BYTES) {
         throw new Error(`Master key file ${options.keyFilePath} is corrupted (wrong length).`);
       }
-      return new Keystore(key);
+      return new Keystore(key, crypto);
     }
-    const sodium = await getSodium();
-    const key = sodium.randombytes_buf(MASTER_KEY_BYTES);
+    const key = crypto.randomBytes(MASTER_KEY_BYTES);
     mkdirSync(dirname(options.keyFilePath), { recursive: true });
     writeFileSync(options.keyFilePath, bytesToBase64(key), { mode: 0o600 });
     chmodSync(options.keyFilePath, 0o600);
-    return new Keystore(key);
+    return new Keystore(key, crypto);
   }
 
   /** Test-only: an ephemeral keystore with a random in-memory master key. */
-  static async ephemeral(): Promise<Keystore> {
-    const sodium = await getSodium();
-    return new Keystore(sodium.randombytes_buf(MASTER_KEY_BYTES));
+  static async ephemeral(crypto: QevCryptoProvider = sodiumCryptoProvider): Promise<Keystore> {
+    await crypto.ready();
+    return new Keystore(crypto.randomBytes(MASTER_KEY_BYTES), crypto);
   }
 
   async seal(plaintext: Uint8Array, aad: string): Promise<SealedSecretRecord> {
-    const sodium = await getSodium();
-    const nonce = sodium.randombytes_buf(NONCE_BYTES);
-    const sealed = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-      plaintext,
-      utf8Bytes(aad),
-      null,
-      nonce,
-      this.masterKey
-    );
+    const nonce = this.crypto.randomBytes(NONCE_BYTES);
+    const sealed = this.crypto.aeadEncrypt(plaintext, utf8Bytes(aad), nonce, this.masterKey);
     return {
       nonceB64: bytesToBase64(nonce),
       sealedB64: bytesToBase64(sealed),
@@ -81,10 +87,8 @@ export class Keystore {
   }
 
   async openSealed(record: SealedSecretRecord, aad: string): Promise<Uint8Array> {
-    const sodium = await getSodium();
     try {
-      return sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-        null,
+      return this.crypto.aeadDecrypt(
         base64ToBytes(record.sealedB64),
         utf8Bytes(aad),
         base64ToBytes(record.nonceB64),

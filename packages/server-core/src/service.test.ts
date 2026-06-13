@@ -5,7 +5,8 @@ import {
   type StripeLikeClient,
   type StripeLikeEvent
 } from "@my-digital/payments-stripe";
-import { MemoryMarketplaceStore, openSqliteStore, type MarketplaceStore } from "@my-digital/store";
+import { MemoryMarketplaceStore, type MarketplaceStore } from "@my-digital/store";
+import { openSqliteStore } from "@my-digital/store/node";
 import type { LicenseId, ListingId } from "@my-digital/types";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

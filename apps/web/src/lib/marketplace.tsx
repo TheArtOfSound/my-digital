@@ -236,8 +236,8 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         if (input.bytes.byteLength === 0) {
           throw new Error("The product content is empty. Add text content or choose a file.");
         }
-        if (input.bytes.byteLength > 2_000_000) {
-          throw new Error("Keep files under 2 MB in the dev instance.");
+        if (input.bytes.byteLength > 1_000_000) {
+          throw new Error("Keep files under 1 MB in this instance.");
         }
         const result = await api.createListing({
           title: input.title,

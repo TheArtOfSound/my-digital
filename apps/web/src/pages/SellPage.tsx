@@ -178,7 +178,7 @@ export function SellPage() {
             />
           </label>
           <label className="field">
-            Or choose a file (max 2 MB — the demo stores locked payloads in this browser)
+            Or choose a file (max 1 MB in this instance)
             <input
               type="file"
               onChange={(event) => setFile(event.target.files?.[0] ?? null)}

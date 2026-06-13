@@ -1,9 +1,9 @@
 import type {
-  Asset,
   AssetId,
   AssetManifest,
   AssetVersion,
   AssetVersionId,
+  Asset,
   Buyer,
   BuyerId,
   BuyerLicense,
@@ -24,19 +24,9 @@ import type {
   Revocation,
   UnlockCode
 } from "@my-digital/types";
-import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
-import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import type {
-  MarketplaceStore,
-  SealedSecretRecord,
-  StoredCheckoutSession,
-  StoredIssuerRecord
-} from "./interface";
+import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import type { MarketplaceStore, SealedSecretRecord, StoredCheckoutSession, StoredIssuerRecord } from "./interface";
 import {
   rowToAsset,
   rowToAssetVersion,
@@ -54,45 +44,42 @@ import {
 } from "./row-mappers";
 import * as schema from "./schema";
 
-const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
-
-export interface OpenSqliteStoreOptions {
-  /** File path for the database, or ":memory:" for an ephemeral database. */
-  path: string;
+/**
+ * Minimal structural type for a Cloudflare D1 binding, so this package does
+ * not need @cloudflare/workers-types as a dependency.
+ */
+export interface D1DatabaseLike {
+  prepare(query: string): unknown;
+  batch(statements: unknown[]): Promise<unknown[]>;
+  exec(query: string): Promise<unknown>;
+  dump?(): Promise<ArrayBuffer>;
 }
 
-export function openSqliteStore(options: OpenSqliteStoreOptions): SqliteMarketplaceStore {
-  if (options.path !== ":memory:") {
-    mkdirSync(dirname(options.path), { recursive: true });
-  }
-  const sqlite = new Database(options.path);
-  if (options.path !== ":memory:") {
-    sqlite.pragma("journal_mode = WAL");
-  }
-  sqlite.pragma("foreign_keys = ON");
-  const db = drizzle(sqlite);
-  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-  return new SqliteMarketplaceStore(db, sqlite);
-}
+/**
+ * Cloudflare D1 implementation of MarketplaceStore. Same Drizzle schema and
+ * row mappers as the better-sqlite3 store; the only difference is the async
+ * D1 driver. Blob columns use Buffer (provided by the Workers nodejs_compat
+ * flag), matching the better-sqlite3 store's representation exactly.
+ * Migrations are applied out of band via `wrangler d1 migrations apply`.
+ */
+export class D1MarketplaceStore implements MarketplaceStore {
+  private readonly db: DrizzleD1Database;
 
-export class SqliteMarketplaceStore implements MarketplaceStore {
-  constructor(
-    private readonly db: BetterSQLite3Database,
-    private readonly sqlite: Database.Database
-  ) {}
+  constructor(d1: D1DatabaseLike) {
+    this.db = drizzle(d1 as never);
+  }
 
   async putIssuer(issuer: StoredIssuerRecord): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.issuers)
       .values(issuer)
       .onConflictDoUpdate({
         target: schema.issuers.name,
         set: { publicKeyB64: issuer.publicKeyB64, createdAt: issuer.createdAt }
-      })
-      .run();
+      });
   }
   async getIssuer(name: string): Promise<StoredIssuerRecord | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.issuers)
       .where(eq(schema.issuers.name, name))
@@ -101,31 +88,29 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   }
 
   async insertCreator(creator: Creator): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.creators)
-      .values({ ...creator, publicSigningKey: creator.publicSigningKey ?? null })
-      .run();
+      .values({ ...creator, publicSigningKey: creator.publicSigningKey ?? null });
   }
   async getCreator(id: CreatorId): Promise<Creator | null> {
-    const row = this.db.select().from(schema.creators).where(eq(schema.creators.id, id)).get();
+    const row = await this.db.select().from(schema.creators).where(eq(schema.creators.id, id)).get();
     return row ? rowToCreator(row) : null;
   }
   async listCreators(): Promise<Creator[]> {
-    return this.db.select().from(schema.creators).all().map(rowToCreator);
+    return (await this.db.select().from(schema.creators).all()).map(rowToCreator);
   }
 
   async insertBuyer(buyer: Buyer): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.buyers)
-      .values({ ...buyer, displayName: buyer.displayName ?? null })
-      .run();
+      .values({ ...buyer, displayName: buyer.displayName ?? null });
   }
   async getBuyer(id: BuyerId): Promise<Buyer | null> {
-    const row = this.db.select().from(schema.buyers).where(eq(schema.buyers.id, id)).get();
+    const row = await this.db.select().from(schema.buyers).where(eq(schema.buyers.id, id)).get();
     return row ? rowToBuyer(row) : null;
   }
   async getBuyerByEmailHash(emailHash: string): Promise<Buyer | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.buyers)
       .where(eq(schema.buyers.emailHash, emailHash))
@@ -133,35 +118,32 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? rowToBuyer(row) : null;
   }
   async listBuyers(): Promise<Buyer[]> {
-    return this.db.select().from(schema.buyers).all().map(rowToBuyer);
+    return (await this.db.select().from(schema.buyers).all()).map(rowToBuyer);
   }
 
   async insertAsset(asset: Asset): Promise<void> {
-    this.db.insert(schema.assets).values(asset).run();
+    await this.db.insert(schema.assets).values(asset);
   }
   async getAsset(id: AssetId): Promise<Asset | null> {
-    const row = this.db.select().from(schema.assets).where(eq(schema.assets.id, id)).get();
+    const row = await this.db.select().from(schema.assets).where(eq(schema.assets.id, id)).get();
     return row ? rowToAsset(row) : null;
   }
   async listAssets(): Promise<Asset[]> {
-    return this.db.select().from(schema.assets).all().map(rowToAsset);
+    return (await this.db.select().from(schema.assets).all()).map(rowToAsset);
   }
   async updateAssetStatus(id: AssetId, status: Asset["status"]): Promise<void> {
-    this.db.update(schema.assets).set({ status }).where(eq(schema.assets.id, id)).run();
+    await this.db.update(schema.assets).set({ status }).where(eq(schema.assets.id, id));
   }
 
   async insertAssetVersion(version: AssetVersion, manifest: AssetManifest): Promise<void> {
-    this.db
-      .insert(schema.assetVersions)
-      .values({
-        ...version,
-        changelog: version.changelog ?? null,
-        manifestJson: JSON.stringify(manifest)
-      })
-      .run();
+    await this.db.insert(schema.assetVersions).values({
+      ...version,
+      changelog: version.changelog ?? null,
+      manifestJson: JSON.stringify(manifest)
+    });
   }
   async getAssetVersion(id: AssetVersionId): Promise<AssetVersion | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.assetVersions)
       .where(eq(schema.assetVersions.id, id))
@@ -169,7 +151,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? rowToAssetVersion(row) : null;
   }
   async getAssetManifest(id: AssetVersionId): Promise<AssetManifest | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.assetVersions)
       .where(eq(schema.assetVersions.id, id))
@@ -177,17 +159,16 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? (JSON.parse(row.manifestJson) as AssetManifest) : null;
   }
   async listAssetVersions(): Promise<AssetVersion[]> {
-    return this.db.select().from(schema.assetVersions).all().map(rowToAssetVersion);
+    return (await this.db.select().from(schema.assetVersions).all()).map(rowToAssetVersion);
   }
 
   async insertLockedAsset(lockedAsset: LockedAsset): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.lockedAssets)
-      .values({ ...lockedAsset, storageUri: lockedAsset.storageUri ?? null })
-      .run();
+      .values({ ...lockedAsset, storageUri: lockedAsset.storageUri ?? null });
   }
   async getLockedAsset(id: LockedAssetId): Promise<LockedAsset | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.lockedAssets)
       .where(eq(schema.lockedAssets.id, id))
@@ -195,7 +176,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? rowToLockedAsset(row) : null;
   }
   async getLockedAssetByVersion(assetVersionId: AssetVersionId): Promise<LockedAsset | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.lockedAssets)
       .where(eq(schema.lockedAssets.assetVersionId, assetVersionId))
@@ -204,17 +185,16 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   }
 
   async putLockedPayload(lockedAssetId: LockedAssetId, payload: Uint8Array): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.lockedPayloads)
       .values({ lockedAssetId, payload: Buffer.from(payload) })
       .onConflictDoUpdate({
         target: schema.lockedPayloads.lockedAssetId,
         set: { payload: Buffer.from(payload) }
-      })
-      .run();
+      });
   }
   async getLockedPayload(lockedAssetId: LockedAssetId): Promise<Uint8Array | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.lockedPayloads)
       .where(eq(schema.lockedPayloads.lockedAssetId, lockedAssetId))
@@ -223,17 +203,16 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   }
 
   async putCustodySecret(lockedAssetId: LockedAssetId, secret: SealedSecretRecord): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.custodySecrets)
       .values({ lockedAssetId, ...secret })
       .onConflictDoUpdate({
         target: schema.custodySecrets.lockedAssetId,
         set: { nonceB64: secret.nonceB64, sealedB64: secret.sealedB64, createdAt: secret.createdAt }
-      })
-      .run();
+      });
   }
   async getCustodySecret(lockedAssetId: LockedAssetId): Promise<SealedSecretRecord | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.custodySecrets)
       .where(eq(schema.custodySecrets.lockedAssetId, lockedAssetId))
@@ -244,17 +223,16 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   }
 
   async putIssuerSecret(issuerName: string, secret: SealedSecretRecord): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.issuerSecrets)
       .values({ issuerName, ...secret })
       .onConflictDoUpdate({
         target: schema.issuerSecrets.issuerName,
         set: { nonceB64: secret.nonceB64, sealedB64: secret.sealedB64, createdAt: secret.createdAt }
-      })
-      .run();
+      });
   }
   async getIssuerSecret(issuerName: string): Promise<SealedSecretRecord | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.issuerSecrets)
       .where(eq(schema.issuerSecrets.issuerName, issuerName))
@@ -269,7 +247,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     payload: Uint8Array,
     payloadHash: string
   ): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.buyerLockedPayloads)
       .values({
         licenseId,
@@ -280,23 +258,24 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
       .onConflictDoUpdate({
         target: schema.buyerLockedPayloads.licenseId,
         set: { payload: Buffer.from(payload), payloadHash }
-      })
-      .run();
+      });
   }
   async getBuyerLockedPayload(
     licenseId: LicenseId
   ): Promise<{ payload: Uint8Array; payloadHash: string } | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.buyerLockedPayloads)
       .where(eq(schema.buyerLockedPayloads.licenseId, licenseId))
       .get();
-    return row ? { payload: new Uint8Array(row.payload), payloadHash: row.payloadHash } : null;
+    return row
+      ? { payload: new Uint8Array(row.payload), payloadHash: row.payloadHash }
+      : null;
   }
   async findBuyerLockedPayloadByHash(
     payloadHash: string
   ): Promise<{ licenseId: LicenseId; payloadHash: string } | null> {
-    const row = this.db
+    const row = await this.db
       .select({
         licenseId: schema.buyerLockedPayloads.licenseId,
         payloadHash: schema.buyerLockedPayloads.payloadHash
@@ -307,7 +286,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? { licenseId: row.licenseId as LicenseId, payloadHash: row.payloadHash } : null;
   }
   async findAssetVersionByContentHash(contentHash: string): Promise<AssetVersion | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.assetVersions)
       .where(eq(schema.assetVersions.contentHash, contentHash))
@@ -316,45 +295,46 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   }
 
   async insertListing(listing: Listing): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.listings)
-      .values({ ...listing, licenseTerms: JSON.stringify(listing.licenseTerms) })
-      .run();
+      .values({ ...listing, licenseTerms: JSON.stringify(listing.licenseTerms) });
   }
   async getListing(id: ListingId): Promise<Listing | null> {
-    const row = this.db.select().from(schema.listings).where(eq(schema.listings.id, id)).get();
+    const row = await this.db.select().from(schema.listings).where(eq(schema.listings.id, id)).get();
     return row ? rowToListing(row) : null;
   }
   async listListings(): Promise<Listing[]> {
-    return this.db.select().from(schema.listings).all().map(rowToListing);
+    return (await this.db.select().from(schema.listings).all()).map(rowToListing);
   }
 
   async insertPurchase(purchase: Purchase): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.purchases)
-      .values({ ...purchase, paidAt: purchase.paidAt ?? null })
-      .run();
+      .values({ ...purchase, paidAt: purchase.paidAt ?? null });
   }
   async getPurchase(id: PurchaseId): Promise<Purchase | null> {
-    const row = this.db.select().from(schema.purchases).where(eq(schema.purchases.id, id)).get();
+    const row = await this.db
+      .select()
+      .from(schema.purchases)
+      .where(eq(schema.purchases.id, id))
+      .get();
     return row ? rowToPurchase(row) : null;
   }
   async listPurchases(): Promise<Purchase[]> {
-    return this.db.select().from(schema.purchases).all().map(rowToPurchase);
+    return (await this.db.select().from(schema.purchases).all()).map(rowToPurchase);
   }
   async updatePurchaseStatus(
     id: PurchaseId,
     status: Purchase["status"],
     paidAt?: string
   ): Promise<void> {
-    this.db
+    await this.db
       .update(schema.purchases)
       .set({ status, ...(paidAt !== undefined ? { paidAt } : {}) })
-      .where(eq(schema.purchases.id, id))
-      .run();
+      .where(eq(schema.purchases.id, id));
   }
   async findPurchaseByProviderReference(providerReference: string): Promise<Purchase | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.purchases)
       .where(eq(schema.purchases.paymentProviderReference, providerReference))
@@ -363,19 +343,16 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   }
 
   async insertCheckoutSession(session: StoredCheckoutSession): Promise<void> {
-    this.db
-      .insert(schema.checkoutSessions)
-      .values({
-        ...session,
-        checkoutUrl: session.checkoutUrl ?? null,
-        completedAt: session.completedAt ?? null
-      })
-      .run();
+    await this.db.insert(schema.checkoutSessions).values({
+      ...session,
+      checkoutUrl: session.checkoutUrl ?? null,
+      completedAt: session.completedAt ?? null
+    });
   }
   async getCheckoutSessionByPurchase(
     purchaseId: PurchaseId
   ): Promise<StoredCheckoutSession | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.checkoutSessions)
       .where(eq(schema.checkoutSessions.purchaseId, purchaseId))
@@ -385,7 +362,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   async getCheckoutSessionByProviderReference(
     providerReference: string
   ): Promise<StoredCheckoutSession | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.checkoutSessions)
       .where(eq(schema.checkoutSessions.providerReference, providerReference))
@@ -397,49 +374,42 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     status: CheckoutSession["status"],
     completedAt?: string
   ): Promise<void> {
-    this.db
+    await this.db
       .update(schema.checkoutSessions)
       .set({ status, ...(completedAt !== undefined ? { completedAt } : {}) })
-      .where(eq(schema.checkoutSessions.id, id))
-      .run();
+      .where(eq(schema.checkoutSessions.id, id));
   }
 
   async insertLicense(license: BuyerLicense): Promise<void> {
-    this.db
-      .insert(schema.licenses)
-      .values({
-        ...license,
-        terms: JSON.stringify(license.terms),
-        allowedUses: JSON.stringify(license.allowedUses),
-        expiresAt: license.expiresAt ?? null,
-        unlockLimit: license.unlockLimit ?? null,
-        revokedAt: license.revokedAt ?? null
-      })
-      .run();
+    await this.db.insert(schema.licenses).values({
+      ...license,
+      terms: JSON.stringify(license.terms),
+      allowedUses: JSON.stringify(license.allowedUses),
+      expiresAt: license.expiresAt ?? null,
+      unlockLimit: license.unlockLimit ?? null,
+      revokedAt: license.revokedAt ?? null
+    });
   }
   async getLicense(id: LicenseId): Promise<BuyerLicense | null> {
-    const row = this.db.select().from(schema.licenses).where(eq(schema.licenses.id, id)).get();
+    const row = await this.db.select().from(schema.licenses).where(eq(schema.licenses.id, id)).get();
     return row ? rowToLicense(row) : null;
   }
   async listLicenses(): Promise<BuyerLicense[]> {
-    return this.db.select().from(schema.licenses).all().map(rowToLicense);
+    return (await this.db.select().from(schema.licenses).all()).map(rowToLicense);
   }
   async setLicenseRevoked(id: LicenseId, revokedAt: string): Promise<void> {
-    this.db.update(schema.licenses).set({ revokedAt }).where(eq(schema.licenses.id, id)).run();
+    await this.db.update(schema.licenses).set({ revokedAt }).where(eq(schema.licenses.id, id));
   }
 
   async insertUnlockCode(code: UnlockCode): Promise<void> {
-    this.db
-      .insert(schema.unlockCodes)
-      .values({
-        ...code,
-        redeemedAt: code.redeemedAt ?? null,
-        maxRedemptions: code.maxRedemptions ?? null
-      })
-      .run();
+    await this.db.insert(schema.unlockCodes).values({
+      ...code,
+      redeemedAt: code.redeemedAt ?? null,
+      maxRedemptions: code.maxRedemptions ?? null
+    });
   }
   async getUnlockCodeByLicense(licenseId: LicenseId): Promise<UnlockCode | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.unlockCodes)
       .where(eq(schema.unlockCodes.licenseId, licenseId))
@@ -447,7 +417,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? rowToUnlockCode(row) : null;
   }
   async updateUnlockCode(code: UnlockCode): Promise<void> {
-    this.db
+    await this.db
       .update(schema.unlockCodes)
       .set({
         codeHash: code.codeHash,
@@ -456,18 +426,16 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
         maxRedemptions: code.maxRedemptions ?? null,
         status: code.status
       })
-      .where(eq(schema.unlockCodes.id, code.id))
-      .run();
+      .where(eq(schema.unlockCodes.id, code.id));
   }
 
   async insertProofReceipt(receipt: ProofReceipt): Promise<void> {
-    this.db
+    await this.db
       .insert(schema.proofReceipts)
-      .values({ ...receipt, verificationUrl: receipt.verificationUrl ?? null })
-      .run();
+      .values({ ...receipt, verificationUrl: receipt.verificationUrl ?? null });
   }
   async getProofReceipt(id: ProofReceiptId): Promise<ProofReceipt | null> {
-    const row = this.db
+    const row = await this.db
       .select()
       .from(schema.proofReceipts)
       .where(eq(schema.proofReceipts.id, id))
@@ -475,46 +443,46 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ? rowToProofReceipt(row) : null;
   }
   async listProofReceipts(): Promise<ProofReceipt[]> {
-    return this.db.select().from(schema.proofReceipts).all().map(rowToProofReceipt);
+    return (await this.db.select().from(schema.proofReceipts).all()).map(rowToProofReceipt);
   }
 
   async insertFingerprint(fingerprint: Fingerprint): Promise<void> {
-    this.db.insert(schema.fingerprints).values(fingerprint).run();
+    await this.db.insert(schema.fingerprints).values(fingerprint);
   }
   async listFingerprints(): Promise<Fingerprint[]> {
-    return this.db.select().from(schema.fingerprints).all().map(rowToFingerprint);
+    return (await this.db.select().from(schema.fingerprints).all()).map(rowToFingerprint);
   }
 
   async insertRevocation(revocation: Revocation): Promise<void> {
-    this.db.insert(schema.revocations).values(revocation).run();
+    await this.db.insert(schema.revocations).values(revocation);
   }
   async listRevocations(): Promise<Revocation[]> {
-    return this.db.select().from(schema.revocations).all().map(rowToRevocation);
+    return (await this.db.select().from(schema.revocations).all()).map(rowToRevocation);
   }
 
   async reset(): Promise<void> {
     // Delete children before parents to respect foreign keys.
-    this.db.delete(schema.checkoutSessions).run();
-    this.db.delete(schema.custodySecrets).run();
-    this.db.delete(schema.issuerSecrets).run();
-    this.db.delete(schema.buyerLockedPayloads).run();
-    this.db.delete(schema.revocations).run();
-    this.db.delete(schema.fingerprints).run();
-    this.db.delete(schema.proofReceipts).run();
-    this.db.delete(schema.unlockCodes).run();
-    this.db.delete(schema.licenses).run();
-    this.db.delete(schema.purchases).run();
-    this.db.delete(schema.listings).run();
-    this.db.delete(schema.lockedPayloads).run();
-    this.db.delete(schema.lockedAssets).run();
-    this.db.delete(schema.assetVersions).run();
-    this.db.delete(schema.assets).run();
-    this.db.delete(schema.buyers).run();
-    this.db.delete(schema.creators).run();
-    this.db.delete(schema.issuers).run();
+    await this.db.delete(schema.checkoutSessions);
+    await this.db.delete(schema.custodySecrets);
+    await this.db.delete(schema.issuerSecrets);
+    await this.db.delete(schema.buyerLockedPayloads);
+    await this.db.delete(schema.revocations);
+    await this.db.delete(schema.fingerprints);
+    await this.db.delete(schema.proofReceipts);
+    await this.db.delete(schema.unlockCodes);
+    await this.db.delete(schema.licenses);
+    await this.db.delete(schema.purchases);
+    await this.db.delete(schema.listings);
+    await this.db.delete(schema.lockedPayloads);
+    await this.db.delete(schema.lockedAssets);
+    await this.db.delete(schema.assetVersions);
+    await this.db.delete(schema.assets);
+    await this.db.delete(schema.buyers);
+    await this.db.delete(schema.creators);
+    await this.db.delete(schema.issuers);
   }
 
   async close(): Promise<void> {
-    this.sqlite.close();
+    // D1 connections are managed by the Workers runtime.
   }
 }

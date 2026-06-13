@@ -36,6 +36,13 @@ export {
   type QevVaultV2EnvelopeAdapterOptions
 } from "./qev-vault-v2";
 export { compareRecordedHashes } from "./hash-comparison";
+export {
+  b64urlDecode,
+  b64urlEncode,
+  nobleCryptoProvider,
+  sodiumCryptoProvider,
+  type QevCryptoProvider
+} from "./qev-crypto";
 
 const DEMO_WARNING = "DEMO ONLY - NOT PRODUCTION CRYPTO - FOR LIFECYCLE TESTING";
 
