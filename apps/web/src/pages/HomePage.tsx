@@ -5,7 +5,7 @@ import { useMarketplace } from "../lib/marketplace";
 const lifecycle = ["Create", "Lock", "List", "Buy", "License", "Unlock", "Verify", "Trace"];
 
 export function HomePage() {
-  const { state } = useMarketplace();
+  const { state, paymentsProvider } = useMarketplace();
 
   return (
     <>
@@ -25,10 +25,14 @@ export function HomePage() {
           <Link className="btn btn-ghost" to="/creator">
             Creator dashboard
           </Link>
+          <Link className="btn btn-ghost" to="/back">
+            Back the launch
+          </Link>
         </div>
         <div className="notice">
-          Preview build: envelope locking, licensing, receipts, and trace are fully operational
-          on QEV Vault V2 cryptography. Payments are simulated — no charges occur.
+          {paymentsProvider === "stripe"
+            ? "Envelope locking, licensing, receipts, and trace run on QEV Vault V2 cryptography. Payments are processed by Stripe on its secure hosted checkout."
+            : "Preview build: envelope locking, licensing, receipts, and trace are fully operational on QEV Vault V2 cryptography. Payments are simulated — no charges occur."}
         </div>
       </section>
 

@@ -5,7 +5,8 @@ import { useMarketplace } from "../lib/marketplace";
 
 export function ListingPage() {
   const { listingId } = useParams<{ listingId: string }>();
-  const { state } = useMarketplace();
+  const { state, paymentsProvider } = useMarketplace();
+  const stripeLive = paymentsProvider === "stripe";
 
   const listing = state.listings.find((entry) => entry.id === listingId);
   if (!listing) {
@@ -13,8 +14,8 @@ export function ListingPage() {
       <section className="panel">
         <h2>Listing not found</h2>
         <p>
-          This listing does not exist in this browser's demo records.{" "}
-          <Link to="/sell">Create one</Link>.
+          This listing is not available in the marketplace.{" "}
+          <Link to="/sell">Lock and list a product</Link> to create one.
         </p>
       </section>
     );
@@ -25,6 +26,9 @@ export function ListingPage() {
   const lockedAsset = state.lockedAssets.find(
     (entry) => entry.assetVersionId === listing.activeAssetVersionId
   );
+  // The demo adapter stamps this format; the real QEV Vault V2 adapter stamps
+  // BRY-NFET-SX-VAULT-V2. Drive the label from data instead of hardcoding it.
+  const isDemoEnvelope = lockedAsset?.envelopeFormat === "MYDIGITAL-DEMO-ENVELOPE";
 
   return (
     <>
@@ -35,12 +39,13 @@ export function ListingPage() {
         <p className="listing-price-big">{formatPrice(listing.priceAmount, listing.priceCurrency)}</p>
         <div className="hero-actions">
           <Link className="btn btn-primary" to={`/checkout/${listing.id}`}>
-            Buy with mock checkout
+            {stripeLive ? "Buy securely with Stripe" : "Buy with mock checkout"}
           </Link>
         </div>
         <div className="notice">
-          Buying issues a buyer-specific license, a one-time-shown unlock code, and a signed proof
-          receipt. Payment is simulated by the mock adapter — no real charge.
+          {stripeLive
+            ? "Buying issues a buyer-specific license, a one-time-shown unlock code, and a signed proof receipt. Payment is processed by Stripe on its secure hosted checkout; card details never touch this site."
+            : "Buying issues a buyer-specific license, a one-time-shown unlock code, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
         </div>
       </section>
 
@@ -67,7 +72,11 @@ export function ListingPage() {
               <dt>Envelope</dt>
               <dd className="mono">
                 {lockedAsset.envelopeFormat} {lockedAsset.envelopeVersion} —{" "}
-                <span className="pill pill-demo">DEMO ONLY</span>
+                {isDemoEnvelope ? (
+                  <span className="pill pill-demo">DEMO ONLY</span>
+                ) : (
+                  <span className="pill pill-pass">PRODUCTION ENVELOPE</span>
+                )}
               </dd>
             </div>
             <div>

@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes } from "react-router-dom";
 import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
+import { BackUsPage } from "./pages/BackUsPage";
 import { CheckoutDonePage } from "./pages/CheckoutDonePage";
 import { CheckoutPage } from "./pages/CheckoutPage";
 import { CreatorPage } from "./pages/CreatorPage";
@@ -34,6 +35,7 @@ function Layout() {
           </NavLink>
           <NavLink to="/trace">Trace</NavLink>
           <NavLink to="/creator">Creator</NavLink>
+          <NavLink to="/back">Back Us</NavLink>
         </div>
         <span className="pill pill-demo">
           {stripeLive ? "Payments by Stripe" : "Preview — Mock Payments"}
@@ -102,6 +104,7 @@ createRoot(document.getElementById("root")!).render(
             <Route index element={<HomePage />} />
             <Route path="/sell" element={<SellPage />} />
             <Route path="/listing/:listingId" element={<ListingPage />} />
+            <Route path="/back" element={<BackUsPage />} />
             <Route path="/checkout/done" element={<CheckoutDonePage />} />
             <Route path="/checkout/:listingId" element={<CheckoutPage />} />
             <Route path="/unlock" element={<UnlockPage />} />

@@ -23,3 +23,6 @@ apps/*/data/
 .wrangler/
 apps/worker/worker-configuration.d.ts
 .dev.vars
+
+# Launch scratch (screenshots rendered for Product Hunt / Peerlist galleries)
+.tmp-launch/
