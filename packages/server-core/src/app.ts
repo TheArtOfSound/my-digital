@@ -9,6 +9,12 @@ import type {
   PurchaseId
 } from "@my-digital/types";
 import { Hono, type Context } from "hono";
+import {
+  SESSION_COOKIE,
+  clearSessionCookie,
+  readCookie,
+  serializeSessionCookie
+} from "./auth";
 import type { MarketplaceService } from "./service";
 
 export interface CreateAppOptions {
@@ -98,6 +104,34 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   );
 
   app.get("/api/issuer", (c) => c.json(service.issuerInfo()));
+
+  // --- Accounts (email + password). Cookies are HttpOnly + SameSite=Lax, and
+  // Secure whenever the request arrives over https. ---
+  const cookieSecure = (c: Context): boolean => new URL(c.req.url).protocol === "https:";
+
+  app.post("/api/auth/signup", async (c) => {
+    const body = await c.req.json<{ email: string; password: string; displayName: string }>();
+    const { user, token } = await service.signup(body);
+    c.header("Set-Cookie", serializeSessionCookie(token, { secure: cookieSecure(c) }));
+    return c.json({ user }, 201);
+  });
+
+  app.post("/api/auth/login", async (c) => {
+    const body = await c.req.json<{ email: string; password: string }>();
+    const { user, token } = await service.login(body);
+    c.header("Set-Cookie", serializeSessionCookie(token, { secure: cookieSecure(c) }));
+    return c.json({ user });
+  });
+
+  app.post("/api/auth/logout", async (c) => {
+    await service.logout(readCookie(c.req.header("cookie"), SESSION_COOKIE));
+    c.header("Set-Cookie", clearSessionCookie({ secure: cookieSecure(c) }));
+    return c.json({ ok: true });
+  });
+
+  app.get("/api/auth/me", async (c) =>
+    c.json({ user: await service.getSessionUser(readCookie(c.req.header("cookie"), SESSION_COOKIE)) })
+  );
 
   app.post("/api/creator", async (c) => {
     const denied = requireAdmin(c);

@@ -12,8 +12,47 @@ export type UnlockCodeId = Brand<string, "UnlockCodeId">;
 export type ProofReceiptId = Brand<string, "ProofReceiptId">;
 export type FingerprintId = Brand<string, "FingerprintId">;
 export type RevocationId = Brand<string, "RevocationId">;
+export type UserId = Brand<string, "UserId">;
+export type SessionId = Brand<string, "SessionId">;
 
 export type VerificationStatus = "pass" | "fail" | "warning" | "unknown";
+
+/**
+ * A platform account. The same account can buy and (after creating a creator
+ * profile) sell. The password hash is an Argon2id-encoded string; it never
+ * leaves the server and is never sent to clients.
+ */
+export interface User {
+  id: UserId;
+  email: string;
+  /** Lower-cased email used for unique lookup. */
+  emailLower: string;
+  passwordHash: string;
+  displayName: string;
+  createdAt: string;
+}
+
+/** A public (client-safe) view of a user — never includes the password hash. */
+export interface PublicUser {
+  id: UserId;
+  email: string;
+  displayName: string;
+  createdAt: string;
+  /** The creator profile owned by this user, if they have become a seller. */
+  creatorId?: CreatorId;
+}
+
+/**
+ * An opaque login session. `id` stores the SHA-256 of the random cookie token
+ * (the raw token lives only in the browser cookie), so a database read cannot
+ * reconstruct a session token.
+ */
+export interface Session {
+  id: SessionId;
+  userId: UserId;
+  createdAt: string;
+  expiresAt: string;
+}
 
 export interface LicenseTerms {
   personalUse: boolean;
@@ -33,6 +72,16 @@ export interface Creator {
   emailHash: string;
   createdAt: string;
   verificationStatus: "unverified" | "reviewed" | "verified";
+  /** The account that owns and manages this seller profile. */
+  userId?: UserId;
+  /** Self-declared legal/business name (verification info). */
+  legalName?: string;
+  /** Self-declared location / country (verification info). */
+  location?: string;
+  /** Public profile/identity links the seller offers for self-verification. */
+  verificationLinks?: string[];
+  /** When the seller last submitted verification details. */
+  verificationSubmittedAt?: string;
   publicSigningKey?: string;
   /** Short creator bio shown on the public profile. */
   bio?: string;
@@ -55,6 +104,8 @@ export interface Buyer {
   emailHash: string;
   displayName?: string;
   createdAt: string;
+  /** The account this buyer belongs to, when the purchase was made while signed in. */
+  userId?: UserId;
 }
 
 export interface Asset {

@@ -11,13 +11,15 @@ import type {
   ProofReceiptId,
   PurchaseId,
   RevocationId,
-  UnlockCodeId
+  UnlockCodeId,
+  UserId
 } from "@my-digital/types";
 
 function prefixedId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
+export const newUserId = (): UserId => prefixedId("user") as UserId;
 export const newCreatorId = (): CreatorId => prefixedId("creator") as CreatorId;
 export const newBuyerId = (): BuyerId => prefixedId("buyer") as BuyerId;
 export const newAssetId = (): AssetId => prefixedId("asset") as AssetId;

@@ -22,7 +22,11 @@ import type {
   Purchase,
   PurchaseId,
   Revocation,
-  UnlockCode
+  Session,
+  SessionId,
+  UnlockCode,
+  User,
+  UserId
 } from "@my-digital/types";
 import Database from "better-sqlite3";
 import { eq } from "drizzle-orm";
@@ -38,6 +42,7 @@ import type {
   StoredIssuerRecord
 } from "./interface";
 import {
+  creatorValues,
   rowToAsset,
   rowToAssetVersion,
   rowToBuyer,
@@ -50,7 +55,9 @@ import {
   rowToProofReceipt,
   rowToPurchase,
   rowToRevocation,
-  rowToUnlockCode
+  rowToSession,
+  rowToUnlockCode,
+  rowToUser
 } from "./row-mappers";
 import * as schema from "./schema";
 
@@ -100,33 +107,55 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     return row ?? null;
   }
 
+  async insertUser(user: User): Promise<void> {
+    this.db.insert(schema.users).values(user).run();
+  }
+  async getUserById(id: UserId): Promise<User | null> {
+    const row = this.db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+    return row ? rowToUser(row) : null;
+  }
+  async getUserByEmailLower(emailLower: string): Promise<User | null> {
+    const row = this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.emailLower, emailLower))
+      .get();
+    return row ? rowToUser(row) : null;
+  }
+  async insertSession(session: Session): Promise<void> {
+    this.db.insert(schema.sessions).values(session).run();
+  }
+  async getSession(id: SessionId): Promise<Session | null> {
+    const row = this.db.select().from(schema.sessions).where(eq(schema.sessions.id, id)).get();
+    return row ? rowToSession(row) : null;
+  }
+  async deleteSession(id: SessionId): Promise<void> {
+    this.db.delete(schema.sessions).where(eq(schema.sessions.id, id)).run();
+  }
+
   async insertCreator(creator: Creator): Promise<void> {
-    this.db
-      .insert(schema.creators)
-      .values({ ...creator, publicSigningKey: creator.publicSigningKey ?? null })
-      .run();
+    this.db.insert(schema.creators).values(creatorValues(creator)).run();
   }
   async getCreator(id: CreatorId): Promise<Creator | null> {
     const row = this.db.select().from(schema.creators).where(eq(schema.creators.id, id)).get();
+    return row ? rowToCreator(row) : null;
+  }
+  async getCreatorByUserId(userId: UserId): Promise<Creator | null> {
+    const row = this.db
+      .select()
+      .from(schema.creators)
+      .where(eq(schema.creators.userId, userId))
+      .get();
     return row ? rowToCreator(row) : null;
   }
   async listCreators(): Promise<Creator[]> {
     return this.db.select().from(schema.creators).all().map(rowToCreator);
   }
   async updateCreator(creator: Creator): Promise<void> {
+    const values = creatorValues(creator);
     this.db
       .update(schema.creators)
-      .set({
-        displayName: creator.displayName,
-        handle: creator.handle,
-        verificationStatus: creator.verificationStatus,
-        publicSigningKey: creator.publicSigningKey ?? null,
-        bio: creator.bio ?? null,
-        avatarUrl: creator.avatarUrl ?? null,
-        websiteUrl: creator.websiteUrl ?? null,
-        stripeAccountId: creator.stripeAccountId ?? null,
-        payoutsEnabled: creator.payoutsEnabled ?? null
-      })
+      .set(values)
       .where(eq(schema.creators.id, creator.id))
       .run();
   }
@@ -134,7 +163,11 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
   async insertBuyer(buyer: Buyer): Promise<void> {
     this.db
       .insert(schema.buyers)
-      .values({ ...buyer, displayName: buyer.displayName ?? null })
+      .values({
+        ...buyer,
+        displayName: buyer.displayName ?? null,
+        userId: buyer.userId ?? null
+      })
       .run();
   }
   async getBuyer(id: BuyerId): Promise<Buyer | null> {
@@ -147,6 +180,10 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
       .from(schema.buyers)
       .where(eq(schema.buyers.emailHash, emailHash))
       .get();
+    return row ? rowToBuyer(row) : null;
+  }
+  async getBuyerByUserId(userId: UserId): Promise<Buyer | null> {
+    const row = this.db.select().from(schema.buyers).where(eq(schema.buyers.userId, userId)).get();
     return row ? rowToBuyer(row) : null;
   }
   async listBuyers(): Promise<Buyer[]> {
@@ -573,6 +610,8 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
     this.db.delete(schema.assets).run();
     this.db.delete(schema.buyers).run();
     this.db.delete(schema.creators).run();
+    this.db.delete(schema.sessions).run();
+    this.db.delete(schema.users).run();
     this.db.delete(schema.issuers).run();
   }
 

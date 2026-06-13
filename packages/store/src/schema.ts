@@ -6,6 +6,24 @@ export const issuers = sqliteTable("issuers", {
   createdAt: text("created_at").notNull()
 });
 
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  emailLower: text("email_lower").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name").notNull(),
+  createdAt: text("created_at").notNull()
+});
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull()
+});
+
 export const creators = sqliteTable("creators", {
   id: text("id").primaryKey(),
   displayName: text("display_name").notNull(),
@@ -13,6 +31,11 @@ export const creators = sqliteTable("creators", {
   emailHash: text("email_hash").notNull(),
   createdAt: text("created_at").notNull(),
   verificationStatus: text("verification_status").notNull(),
+  userId: text("user_id"),
+  legalName: text("legal_name"),
+  location: text("location"),
+  verificationLinks: text("verification_links"),
+  verificationSubmittedAt: text("verification_submitted_at"),
   publicSigningKey: text("public_signing_key"),
   bio: text("bio"),
   avatarUrl: text("avatar_url"),
@@ -25,6 +48,7 @@ export const buyers = sqliteTable("buyers", {
   id: text("id").primaryKey(),
   emailHash: text("email_hash").notNull(),
   displayName: text("display_name"),
+  userId: text("user_id"),
   createdAt: text("created_at").notNull()
 });
 

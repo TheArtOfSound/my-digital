@@ -13,6 +13,7 @@ import {
   issueUnlockCode,
   newFingerprintId,
   newRevocationId,
+  newUserId,
   sha256Hex,
   sha256HexOfString,
   signCanonical,
@@ -38,13 +39,21 @@ import type {
   PaymentConfirmation,
   ProofReceipt,
   ProofReceiptId,
+  PublicUser,
   Purchase,
   PurchaseId,
   Revocation,
   TraceResult,
   UnlockCode,
+  User,
   VerificationResult
 } from "@my-digital/types";
+import {
+  hashPassword,
+  issueSession,
+  sessionIdFromToken,
+  verifyPassword
+} from "./auth";
 import { Keystore, ensureServerIssuer, type ServerIssuer } from "./keystore";
 
 // 1 MB: keeps buyer vaults (payload base64url + envelope overhead) under
@@ -255,6 +264,90 @@ export class MarketplaceService {
     const creator = await createCreator(input);
     await this.opts.store.insertCreator(creator);
     return creator;
+  }
+
+  // --- Accounts (email + password) ---
+
+  private async toPublicUser(user: User): Promise<PublicUser> {
+    const creator = await this.opts.store.getCreatorByUserId(user.id);
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      createdAt: user.createdAt,
+      ...(creator ? { creatorId: creator.id } : {})
+    };
+  }
+
+  /** Registers a new account and opens a session. */
+  async signup(input: {
+    email: string;
+    password: string;
+    displayName: string;
+  }): Promise<{ user: PublicUser; token: string }> {
+    const { store } = this.opts;
+    const email = input.email.trim();
+    const emailLower = email.toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailLower)) {
+      throw new Error("Enter a valid email address.");
+    }
+    const displayName = input.displayName.trim();
+    if (displayName.length < 2 || displayName.length > 80) {
+      throw new Error("Your name must be between 2 and 80 characters.");
+    }
+    if (await store.getUserByEmailLower(emailLower)) {
+      throw new Error("An account with that email already exists. Try logging in.");
+    }
+    const passwordHash = hashPassword(input.password); // enforces length policy
+    const user: User = {
+      id: newUserId(),
+      email,
+      emailLower,
+      passwordHash,
+      displayName,
+      createdAt: new Date().toISOString()
+    };
+    await store.insertUser(user);
+    const issued = await issueSession(user.id);
+    await store.insertSession(issued.session);
+    return { user: await this.toPublicUser(user), token: issued.token };
+  }
+
+  /** Verifies credentials and opens a session. */
+  async login(input: {
+    email: string;
+    password: string;
+  }): Promise<{ user: PublicUser; token: string }> {
+    const { store } = this.opts;
+    const emailLower = input.email.trim().toLowerCase();
+    const user = await store.getUserByEmailLower(emailLower);
+    if (!user || !verifyPassword(input.password, user.passwordHash)) {
+      throw new Error("Incorrect email or password.");
+    }
+    const issued = await issueSession(user.id);
+    await store.insertSession(issued.session);
+    return { user: await this.toPublicUser(user), token: issued.token };
+  }
+
+  /** Ends the session for a raw cookie token (no-op if unknown). */
+  async logout(token: string | undefined): Promise<void> {
+    if (!token) return;
+    await this.opts.store.deleteSession(await sessionIdFromToken(token));
+  }
+
+  /** Resolves the signed-in account for a raw cookie token, or null. */
+  async getSessionUser(token: string | undefined): Promise<PublicUser | null> {
+    if (!token) return null;
+    const { store } = this.opts;
+    const sessionId = await sessionIdFromToken(token);
+    const session = await store.getSession(sessionId);
+    if (!session) return null;
+    if (new Date(session.expiresAt).getTime() < Date.now()) {
+      await store.deleteSession(sessionId);
+      return null;
+    }
+    const user = await store.getUserById(session.userId);
+    return user ? this.toPublicUser(user) : null;
   }
 
   /** Edits the creator's mutable profile (name, handle, bio, avatar, website). */

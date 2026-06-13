@@ -22,12 +22,17 @@ import type {
   Purchase,
   PurchaseId,
   Revocation,
-  UnlockCode
+  Session,
+  SessionId,
+  UnlockCode,
+  User,
+  UserId
 } from "@my-digital/types";
 import { eq } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import type { MarketplaceStore, SealedSecretRecord, StoredCheckoutSession, StoredIssuerRecord } from "./interface";
 import {
+  creatorValues,
   rowToAsset,
   rowToAssetVersion,
   rowToBuyer,
@@ -40,7 +45,9 @@ import {
   rowToProofReceipt,
   rowToPurchase,
   rowToRevocation,
-  rowToUnlockCode
+  rowToSession,
+  rowToUnlockCode,
+  rowToUser
 } from "./row-mappers";
 import * as schema from "./schema";
 
@@ -87,13 +94,45 @@ export class D1MarketplaceStore implements MarketplaceStore {
     return row ?? null;
   }
 
+  async insertUser(user: User): Promise<void> {
+    await this.db.insert(schema.users).values(user);
+  }
+  async getUserById(id: UserId): Promise<User | null> {
+    const row = await this.db.select().from(schema.users).where(eq(schema.users.id, id)).get();
+    return row ? rowToUser(row) : null;
+  }
+  async getUserByEmailLower(emailLower: string): Promise<User | null> {
+    const row = await this.db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.emailLower, emailLower))
+      .get();
+    return row ? rowToUser(row) : null;
+  }
+  async insertSession(session: Session): Promise<void> {
+    await this.db.insert(schema.sessions).values(session);
+  }
+  async getSession(id: SessionId): Promise<Session | null> {
+    const row = await this.db.select().from(schema.sessions).where(eq(schema.sessions.id, id)).get();
+    return row ? rowToSession(row) : null;
+  }
+  async deleteSession(id: SessionId): Promise<void> {
+    await this.db.delete(schema.sessions).where(eq(schema.sessions.id, id));
+  }
+
   async insertCreator(creator: Creator): Promise<void> {
-    await this.db
-      .insert(schema.creators)
-      .values({ ...creator, publicSigningKey: creator.publicSigningKey ?? null });
+    await this.db.insert(schema.creators).values(creatorValues(creator));
   }
   async getCreator(id: CreatorId): Promise<Creator | null> {
     const row = await this.db.select().from(schema.creators).where(eq(schema.creators.id, id)).get();
+    return row ? rowToCreator(row) : null;
+  }
+  async getCreatorByUserId(userId: UserId): Promise<Creator | null> {
+    const row = await this.db
+      .select()
+      .from(schema.creators)
+      .where(eq(schema.creators.userId, userId))
+      .get();
     return row ? rowToCreator(row) : null;
   }
   async listCreators(): Promise<Creator[]> {
@@ -102,24 +141,14 @@ export class D1MarketplaceStore implements MarketplaceStore {
   async updateCreator(creator: Creator): Promise<void> {
     await this.db
       .update(schema.creators)
-      .set({
-        displayName: creator.displayName,
-        handle: creator.handle,
-        verificationStatus: creator.verificationStatus,
-        publicSigningKey: creator.publicSigningKey ?? null,
-        bio: creator.bio ?? null,
-        avatarUrl: creator.avatarUrl ?? null,
-        websiteUrl: creator.websiteUrl ?? null,
-        stripeAccountId: creator.stripeAccountId ?? null,
-        payoutsEnabled: creator.payoutsEnabled ?? null
-      })
+      .set(creatorValues(creator))
       .where(eq(schema.creators.id, creator.id));
   }
 
   async insertBuyer(buyer: Buyer): Promise<void> {
     await this.db
       .insert(schema.buyers)
-      .values({ ...buyer, displayName: buyer.displayName ?? null });
+      .values({ ...buyer, displayName: buyer.displayName ?? null, userId: buyer.userId ?? null });
   }
   async getBuyer(id: BuyerId): Promise<Buyer | null> {
     const row = await this.db.select().from(schema.buyers).where(eq(schema.buyers.id, id)).get();
@@ -130,6 +159,14 @@ export class D1MarketplaceStore implements MarketplaceStore {
       .select()
       .from(schema.buyers)
       .where(eq(schema.buyers.emailHash, emailHash))
+      .get();
+    return row ? rowToBuyer(row) : null;
+  }
+  async getBuyerByUserId(userId: UserId): Promise<Buyer | null> {
+    const row = await this.db
+      .select()
+      .from(schema.buyers)
+      .where(eq(schema.buyers.userId, userId))
       .get();
     return row ? rowToBuyer(row) : null;
   }
@@ -536,6 +573,8 @@ export class D1MarketplaceStore implements MarketplaceStore {
     await this.db.delete(schema.assets);
     await this.db.delete(schema.buyers);
     await this.db.delete(schema.creators);
+    await this.db.delete(schema.sessions);
+    await this.db.delete(schema.users);
     await this.db.delete(schema.issuers);
   }
 

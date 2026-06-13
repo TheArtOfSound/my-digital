@@ -22,7 +22,11 @@ import type {
   Purchase,
   PurchaseId,
   Revocation,
-  UnlockCode
+  Session,
+  SessionId,
+  UnlockCode,
+  User,
+  UserId
 } from "@my-digital/types";
 import type { StoredCheckoutSession } from "./interface";
 import * as schema from "./schema";
@@ -37,6 +41,8 @@ export function opt<K extends string, V>(
 
 type CreatorRow = typeof schema.creators.$inferSelect;
 type BuyerRow = typeof schema.buyers.$inferSelect;
+type UserRow = typeof schema.users.$inferSelect;
+type SessionRow = typeof schema.sessions.$inferSelect;
 type AssetRow = typeof schema.assets.$inferSelect;
 type AssetVersionRow = typeof schema.assetVersions.$inferSelect;
 type LockedAssetRow = typeof schema.lockedAssets.$inferSelect;
@@ -49,6 +55,26 @@ type ProofReceiptRow = typeof schema.proofReceipts.$inferSelect;
 type FingerprintRow = typeof schema.fingerprints.$inferSelect;
 type RevocationRow = typeof schema.revocations.$inferSelect;
 
+export function rowToUser(row: UserRow): User {
+  return {
+    id: row.id as UserId,
+    email: row.email,
+    emailLower: row.emailLower,
+    passwordHash: row.passwordHash,
+    displayName: row.displayName,
+    createdAt: row.createdAt
+  };
+}
+
+export function rowToSession(row: SessionRow): Session {
+  return {
+    id: row.id as SessionId,
+    userId: row.userId as UserId,
+    createdAt: row.createdAt,
+    expiresAt: row.expiresAt
+  };
+}
+
 export function rowToCreator(row: CreatorRow): Creator {
   return {
     id: row.id as CreatorId,
@@ -57,6 +83,13 @@ export function rowToCreator(row: CreatorRow): Creator {
     emailHash: row.emailHash,
     createdAt: row.createdAt,
     verificationStatus: row.verificationStatus as Creator["verificationStatus"],
+    ...opt("userId", row.userId as UserId | null),
+    ...opt("legalName", row.legalName),
+    ...opt("location", row.location),
+    ...(row.verificationLinks
+      ? { verificationLinks: JSON.parse(row.verificationLinks) as string[] }
+      : {}),
+    ...opt("verificationSubmittedAt", row.verificationSubmittedAt),
     ...opt("publicSigningKey", row.publicSigningKey),
     ...opt("bio", row.bio),
     ...opt("avatarUrl", row.avatarUrl),
@@ -66,12 +99,40 @@ export function rowToCreator(row: CreatorRow): Creator {
   };
 }
 
+/**
+ * Column values for inserting/updating a creator. Serializes verificationLinks
+ * to JSON text and normalizes optional fields to null. Shared by the SQLite and
+ * D1 stores so both persist the profile identically.
+ */
+export function creatorValues(creator: Creator) {
+  return {
+    id: creator.id,
+    displayName: creator.displayName,
+    handle: creator.handle,
+    emailHash: creator.emailHash,
+    createdAt: creator.createdAt,
+    verificationStatus: creator.verificationStatus,
+    userId: creator.userId ?? null,
+    legalName: creator.legalName ?? null,
+    location: creator.location ?? null,
+    verificationLinks: creator.verificationLinks ? JSON.stringify(creator.verificationLinks) : null,
+    verificationSubmittedAt: creator.verificationSubmittedAt ?? null,
+    publicSigningKey: creator.publicSigningKey ?? null,
+    bio: creator.bio ?? null,
+    avatarUrl: creator.avatarUrl ?? null,
+    websiteUrl: creator.websiteUrl ?? null,
+    stripeAccountId: creator.stripeAccountId ?? null,
+    payoutsEnabled: creator.payoutsEnabled ?? null
+  };
+}
+
 export function rowToBuyer(row: BuyerRow): Buyer {
   return {
     id: row.id as BuyerId,
     emailHash: row.emailHash,
     createdAt: row.createdAt,
-    ...opt("displayName", row.displayName)
+    ...opt("displayName", row.displayName),
+    ...opt("userId", row.userId as UserId | null)
   };
 }
 

@@ -23,8 +23,12 @@ import type {
   PurchaseId,
   Revocation,
   RevocationId,
+  Session,
+  SessionId,
   UnlockCode,
-  UnlockCodeId
+  UnlockCodeId,
+  User,
+  UserId
 } from "@my-digital/types";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { MarketplaceStore } from "./interface";
@@ -224,6 +228,50 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.listCreators()).toEqual([creator]);
     });
 
+    it("round-trips users and finds them by lowercased email", async () => {
+      const user: User = {
+        id: "user_conf_1" as UserId,
+        email: "Maker@Example.com",
+        emailLower: "maker@example.com",
+        passwordHash: "$argon2id$v=19$fake",
+        displayName: "Maker",
+        createdAt: "2026-06-13T00:00:00.000Z"
+      };
+      await store.insertUser(user);
+      expect(await store.getUserById(user.id)).toEqual(user);
+      expect(await store.getUserByEmailLower("maker@example.com")).toEqual(user);
+      expect(await store.getUserByEmailLower("nobody@example.com")).toBeNull();
+    });
+
+    it("round-trips and deletes sessions", async () => {
+      const session: Session = {
+        id: "sess_conf_1" as SessionId,
+        userId: "user_conf_1" as UserId,
+        createdAt: "2026-06-13T00:00:00.000Z",
+        expiresAt: "2026-06-20T00:00:00.000Z"
+      };
+      await store.insertSession(session);
+      expect(await store.getSession(session.id)).toEqual(session);
+      await store.deleteSession(session.id);
+      expect(await store.getSession(session.id)).toBeNull();
+    });
+
+    it("links a seller profile to its owning account and persists verification fields", async () => {
+      const owned: Creator = {
+        ...creator,
+        id: "creator_owned_1" as CreatorId,
+        userId: "user_conf_1" as UserId,
+        legalName: "Jane Q. Maker",
+        location: "Berlin, DE",
+        verificationLinks: ["https://example.com", "https://github.com/jane"],
+        verificationSubmittedAt: "2026-06-13T00:00:00.000Z",
+        verificationStatus: "verified"
+      };
+      await store.insertCreator(owned);
+      expect(await store.getCreatorByUserId("user_conf_1" as UserId)).toEqual(owned);
+      expect(await store.getCreatorByUserId("user_none" as UserId)).toBeNull();
+    });
+
     it("updates a creator's profile + payout fields and clears optional ones", async () => {
       await store.updateCreator({
         ...creator,
@@ -253,6 +301,18 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.getBuyer(buyer.id)).toEqual(buyer);
       expect(await store.getBuyerByEmailHash(buyer.emailHash)).toEqual(buyer);
       expect(await store.getBuyerByEmailHash("00".repeat(32))).toBeNull();
+    });
+
+    it("links a buyer to its owning account", async () => {
+      const owned: Buyer = {
+        id: "buyer_owned_1" as BuyerId,
+        emailHash: "cd".repeat(32),
+        userId: "user_conf_1" as UserId,
+        createdAt: "2026-06-13T00:00:00.000Z"
+      };
+      await store.insertBuyer(owned);
+      expect(await store.getBuyerByUserId("user_conf_1" as UserId)).toEqual(owned);
+      expect(await store.getBuyerByUserId("user_none" as UserId)).toBeNull();
     });
 
     it("round-trips assets and updates their status", async () => {

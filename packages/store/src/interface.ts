@@ -22,7 +22,11 @@ import type {
   Purchase,
   PurchaseId,
   Revocation,
-  UnlockCode
+  Session,
+  SessionId,
+  UnlockCode,
+  User,
+  UserId
 } from "@my-digital/types";
 
 /**
@@ -53,8 +57,18 @@ export interface MarketplaceStore {
   putIssuer(issuer: StoredIssuerRecord): Promise<void>;
   getIssuer(name: string): Promise<StoredIssuerRecord | null>;
 
+  // Accounts & sessions.
+  insertUser(user: User): Promise<void>;
+  getUserById(id: UserId): Promise<User | null>;
+  getUserByEmailLower(emailLower: string): Promise<User | null>;
+  insertSession(session: Session): Promise<void>;
+  getSession(id: SessionId): Promise<Session | null>;
+  deleteSession(id: SessionId): Promise<void>;
+
   insertCreator(creator: Creator): Promise<void>;
   getCreator(id: CreatorId): Promise<Creator | null>;
+  /** The seller profile owned by an account, if any. */
+  getCreatorByUserId(userId: UserId): Promise<Creator | null>;
   listCreators(): Promise<Creator[]>;
   /** Replaces a creator's mutable profile fields. */
   updateCreator(creator: Creator): Promise<void>;
@@ -62,6 +76,8 @@ export interface MarketplaceStore {
   insertBuyer(buyer: Buyer): Promise<void>;
   getBuyer(id: BuyerId): Promise<Buyer | null>;
   getBuyerByEmailHash(emailHash: string): Promise<Buyer | null>;
+  /** The buyer record linked to an account, if any (persistent library). */
+  getBuyerByUserId(userId: UserId): Promise<Buyer | null>;
   listBuyers(): Promise<Buyer[]>;
 
   insertAsset(asset: Asset): Promise<void>;

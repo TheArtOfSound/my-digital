@@ -22,7 +22,11 @@ import type {
   Purchase,
   PurchaseId,
   Revocation,
-  UnlockCode
+  Session,
+  SessionId,
+  UnlockCode,
+  User,
+  UserId
 } from "@my-digital/types";
 import type {
   MarketplaceStore,
@@ -42,6 +46,8 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   private issuerSecrets = new Map<string, SealedSecretRecord>();
   private buyerLockedPayloads = new Map<string, { payload: Uint8Array; payloadHash: string }>();
   private checkoutSessions = new Map<string, StoredCheckoutSession>();
+  private users = new Map<string, User>();
+  private sessions = new Map<string, Session>();
   private creators = new Map<string, Creator>();
   private buyers = new Map<string, Buyer>();
   private assets = new Map<string, Asset>();
@@ -65,11 +71,37 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
     return found ? clone(found) : null;
   }
 
+  async insertUser(user: User): Promise<void> {
+    this.users.set(user.id, clone(user));
+  }
+  async getUserById(id: UserId): Promise<User | null> {
+    const found = this.users.get(id);
+    return found ? clone(found) : null;
+  }
+  async getUserByEmailLower(emailLower: string): Promise<User | null> {
+    const found = [...this.users.values()].find((u) => u.emailLower === emailLower);
+    return found ? clone(found) : null;
+  }
+  async insertSession(session: Session): Promise<void> {
+    this.sessions.set(session.id, clone(session));
+  }
+  async getSession(id: SessionId): Promise<Session | null> {
+    const found = this.sessions.get(id);
+    return found ? clone(found) : null;
+  }
+  async deleteSession(id: SessionId): Promise<void> {
+    this.sessions.delete(id);
+  }
+
   async insertCreator(creator: Creator): Promise<void> {
     this.creators.set(creator.id, clone(creator));
   }
   async getCreator(id: CreatorId): Promise<Creator | null> {
     const found = this.creators.get(id);
+    return found ? clone(found) : null;
+  }
+  async getCreatorByUserId(userId: UserId): Promise<Creator | null> {
+    const found = [...this.creators.values()].find((creator) => creator.userId === userId);
     return found ? clone(found) : null;
   }
   async listCreators(): Promise<Creator[]> {
@@ -88,6 +120,10 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   }
   async getBuyerByEmailHash(emailHash: string): Promise<Buyer | null> {
     const found = [...this.buyers.values()].find((buyer) => buyer.emailHash === emailHash);
+    return found ? clone(found) : null;
+  }
+  async getBuyerByUserId(userId: UserId): Promise<Buyer | null> {
+    const found = [...this.buyers.values()].find((buyer) => buyer.userId === userId);
     return found ? clone(found) : null;
   }
   async listBuyers(): Promise<Buyer[]> {
@@ -354,6 +390,8 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
     this.issuerSecrets.clear();
     this.buyerLockedPayloads.clear();
     this.issuers.clear();
+    this.users.clear();
+    this.sessions.clear();
     this.creators.clear();
     this.buyers.clear();
     this.assets.clear();

@@ -720,6 +720,71 @@ describe("issuer persistence across restarts", () => {
   });
 });
 
+describe("Accounts (email + password)", () => {
+  it("signs up, resolves the session, and logs out", async () => {
+    const { service } = await makeService();
+    const { user, token } = await service.signup({
+      email: "Sam@Example.com",
+      password: "correct horse battery",
+      displayName: "Sam"
+    });
+    expect(user.email).toBe("Sam@Example.com");
+    expect(user.creatorId).toBeUndefined();
+    expect(await service.getSessionUser(token)).toMatchObject({ id: user.id });
+    await service.logout(token);
+    expect(await service.getSessionUser(token)).toBeNull();
+  });
+
+  it("rejects duplicate emails (case-insensitive) and weak passwords", async () => {
+    const { service } = await makeService();
+    await service.signup({ email: "dup@example.com", password: "longenough1", displayName: "Dup" });
+    await expect(
+      service.signup({ email: "DUP@example.com", password: "longenough1", displayName: "Two" })
+    ).rejects.toThrow(/already exists/);
+    await expect(
+      service.signup({ email: "new@example.com", password: "short", displayName: "New" })
+    ).rejects.toThrow(/at least 8/);
+  });
+
+  it("logs in with correct credentials and rejects wrong ones generically", async () => {
+    const { service } = await makeService();
+    await service.signup({ email: "log@example.com", password: "supersecret1", displayName: "Log" });
+    const { token } = await service.login({ email: "LOG@example.com", password: "supersecret1" });
+    expect(await service.getSessionUser(token)).toMatchObject({ email: "log@example.com" });
+    await expect(
+      service.login({ email: "log@example.com", password: "wrongpass1" })
+    ).rejects.toThrow(/Incorrect/);
+    await expect(
+      service.login({ email: "missing@example.com", password: "whatever12" })
+    ).rejects.toThrow(/Incorrect/);
+  });
+
+  it("sets an HttpOnly session cookie over HTTP that /api/auth/me reads", async () => {
+    const { service } = await makeService();
+    const app = createApp(service);
+    const res = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "http@example.com",
+        password: "longpassword1",
+        displayName: "Http"
+      })
+    });
+    expect(res.status).toBe(201);
+    const cookie = res.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain(`${"md_session"}=`);
+    expect(cookie).toContain("HttpOnly");
+    const token = /md_session=([^;]+)/.exec(cookie)?.[1] ?? "";
+    const me = await app.request("/api/auth/me", { headers: { Cookie: `md_session=${token}` } });
+    const meJson = (await me.json()) as { user: { email: string } | null };
+    expect(meJson.user?.email).toBe("http@example.com");
+
+    const anon = await app.request("/api/auth/me");
+    expect(((await anon.json()) as { user: unknown }).user).toBeNull();
+  });
+});
+
 describe("HTTP app", () => {
   it("serves health, state, checkout, and vault download", async () => {
     const { service } = await makeService();
