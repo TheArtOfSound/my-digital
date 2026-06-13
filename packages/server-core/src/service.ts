@@ -73,6 +73,8 @@ export interface ServiceOptions {
     enabled: boolean;
     /** Platform application fee in basis points (0 = creators keep 100%). */
     applicationFeeBps?: number;
+    /** Public site origin used to build Stripe onboarding return URLs server-side. */
+    publicBaseUrl?: string;
   };
 }
 
@@ -87,6 +89,28 @@ interface ConnectOps {
   getAccountStatus(
     accountId: string
   ): Promise<{ chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean }>;
+}
+
+/**
+ * The buyer-safe view of a creator: display fields + payout-readiness only.
+ * Drops the email hash and the Stripe connected-account id so the public
+ * /api/state never leaks them.
+ */
+function publicCreatorCard(creator: Creator): Creator {
+  const card: Creator = {
+    id: creator.id,
+    displayName: creator.displayName,
+    handle: creator.handle,
+    emailHash: "",
+    verificationStatus: creator.verificationStatus,
+    createdAt: creator.createdAt
+  };
+  if (creator.publicSigningKey !== undefined) card.publicSigningKey = creator.publicSigningKey;
+  if (creator.bio !== undefined) card.bio = creator.bio;
+  if (creator.avatarUrl !== undefined) card.avatarUrl = creator.avatarUrl;
+  if (creator.websiteUrl !== undefined) card.websiteUrl = creator.websiteUrl;
+  if (creator.payoutsEnabled !== undefined) card.payoutsEnabled = creator.payoutsEnabled;
+  return card;
 }
 
 export interface ServerState {
@@ -152,9 +176,52 @@ export class MarketplaceService {
     return { name: this.issuer.name, publicKeyB64: this.issuer.publicKeyB64 };
   }
 
-  async getState(): Promise<ServerState> {
+  /**
+   * Marketplace state. The default (public) projection is safe for any visitor:
+   * only active listings + their assets + the public creator card + the issuer
+   * public key. It deliberately omits buyer PII (email hashes, names),
+   * purchases/licenses/receipts, and the creator's Stripe account id.
+   *
+   * Pass `{ includePrivate: true }` (gated by the admin token at the HTTP layer)
+   * for the full creator-console view.
+   */
+  async getState(options?: { includePrivate?: boolean }): Promise<ServerState> {
     const { store } = this.opts;
-    const creators = await store.listCreators();
+    const includePrivate = options?.includePrivate === true;
+    const creator = (await store.listCreators())[0] ?? null;
+
+    const allListings = await store.listListings();
+    const listings = includePrivate
+      ? allListings
+      : allListings.filter((listing) => listing.status === "active");
+
+    const assets = await store.listAssets();
+    const assetVersions = await store.listAssetVersions();
+    const lockedAssets = (
+      await Promise.all(assetVersions.map((version) => store.getLockedAssetByVersion(version.id)))
+    ).filter((entry): entry is LockedAsset => entry !== null);
+
+    if (!includePrivate) {
+      // Only expose product metadata for listings buyers can actually see.
+      const versionIds = new Set(listings.map((listing) => listing.activeAssetVersionId));
+      const assetIds = new Set(listings.map((listing) => listing.assetId));
+      return {
+        issuer: this.issuerInfo(),
+        creator: creator ? publicCreatorCard(creator) : null,
+        buyers: [],
+        assets: assets.filter((asset) => assetIds.has(asset.id)),
+        assetVersions: assetVersions.filter((version) => versionIds.has(version.id)),
+        lockedAssets: lockedAssets.filter((locked) => versionIds.has(locked.assetVersionId)),
+        listings,
+        purchases: [],
+        licenses: [],
+        unlockCodes: [],
+        receipts: [],
+        revocations: [],
+        fingerprints: []
+      };
+    }
+
     const licenses = await store.listLicenses();
     const unlockCodes: UnlockCode[] = [];
     for (const license of licenses) {
@@ -163,18 +230,12 @@ export class MarketplaceService {
     }
     return {
       issuer: this.issuerInfo(),
-      creator: creators[0] ?? null,
+      creator,
       buyers: await store.listBuyers(),
-      assets: await store.listAssets(),
-      assetVersions: await store.listAssetVersions(),
-      lockedAssets: (
-        await Promise.all(
-          (await store.listAssetVersions()).map((version) =>
-            store.getLockedAssetByVersion(version.id)
-          )
-        )
-      ).filter((entry): entry is LockedAsset => entry !== null),
-      listings: await store.listListings(),
+      assets,
+      assetVersions,
+      lockedAssets,
+      listings,
       purchases: await store.listPurchases(),
       licenses,
       unlockCodes,
@@ -288,10 +349,10 @@ export class MarketplaceService {
     if (input.priceAmount !== undefined) {
       if (
         !Number.isInteger(input.priceAmount) ||
-        input.priceAmount < 0 ||
+        input.priceAmount < 1 ||
         input.priceAmount > 100_000_00
       ) {
-        throw new Error("Price must be a whole number of cents between 0 and 10,000,000.");
+        throw new Error("Price must be a whole number of cents between 1 and 10,000,000.");
       }
       updated.priceAmount = input.priceAmount;
     }
@@ -351,15 +412,25 @@ export class MarketplaceService {
     return adapter as ConnectOps;
   }
 
+  /** Public site origin for Stripe onboarding return URLs (never client-supplied). */
+  private connectPublicBaseUrl(): string {
+    const configured = this.opts.connect?.publicBaseUrl;
+    if (configured) return configured.replace(/\/+$/, "");
+    try {
+      return new URL(this.opts.verificationUrlBase).origin;
+    } catch {
+      return "https://mydigital.imagineqira.com";
+    }
+  }
+
   /**
    * Starts (or resumes) the creator's Stripe Connect onboarding and returns a
    * hosted onboarding URL. Creates the connected account on first use; the
-   * creator completes bank/identity details on Stripe's own pages.
+   * creator completes bank/identity details on Stripe's own pages. Return URLs
+   * are derived server-side from the configured public origin — never taken
+   * from the request — so they can't be turned into an open redirect.
    */
-  async startCreatorPayoutOnboarding(input: {
-    returnUrl: string;
-    refreshUrl: string;
-  }): Promise<{ url: string; accountId: string }> {
+  async startCreatorPayoutOnboarding(): Promise<{ url: string; accountId: string }> {
     const { store } = this.opts;
     const creator = (await store.listCreators())[0];
     if (!creator) throw new Error("Create the creator profile first.");
@@ -369,10 +440,11 @@ export class MarketplaceService {
       accountId = await connect.createConnectedAccount({});
       await store.updateCreator({ ...creator, stripeAccountId: accountId });
     }
+    const base = this.connectPublicBaseUrl();
     const url = await connect.createOnboardingLink({
       accountId,
-      returnUrl: input.returnUrl,
-      refreshUrl: input.refreshUrl
+      returnUrl: `${base}/creator?payouts=return`,
+      refreshUrl: `${base}/creator?payouts=refresh`
     });
     return { url, accountId };
   }
@@ -417,6 +489,20 @@ export class MarketplaceService {
     if (input.payload.byteLength > MAX_PAYLOAD_BYTES) {
       throw new Error("Keep files under 1 MB in this instance.");
     }
+    if (
+      !Number.isInteger(input.priceAmount) ||
+      input.priceAmount < 1 ||
+      input.priceAmount > 100_000_00
+    ) {
+      throw new Error("Price must be a whole number of cents between 1 and 10,000,000.");
+    }
+    const priceCurrency = input.priceCurrency.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(priceCurrency)) {
+      throw new Error("Currency must be a 3-letter code.");
+    }
+    if (typeof input.title !== "string" || input.title.trim().length === 0) {
+      throw new Error("Title is required.");
+    }
 
     let asset = createAsset({
       creatorId: creator.id,
@@ -446,7 +532,7 @@ export class MarketplaceService {
       asset,
       activeAssetVersionId: assetVersion.id,
       priceAmount: input.priceAmount,
-      priceCurrency: input.priceCurrency,
+      priceCurrency,
       licenseTerms: input.licenseTerms
     });
 
@@ -588,13 +674,23 @@ export class MarketplaceService {
     const adapter = this.opts.payments as {
       confirmFromWebhook?: (
         rawBody: string,
-        signature: string
+        signature: string,
+        resolveSession?: (
+          providerReference: string
+        ) => Promise<CheckoutSession | undefined> | CheckoutSession | undefined
       ) => Promise<PaymentConfirmation | null>;
     };
     if (!adapter.confirmFromWebhook) {
       throw new Error("The active payment adapter does not support webhooks.");
     }
-    const confirmation = await adapter.confirmFromWebhook(rawBody, signature);
+    // Rehydrate the persisted session if the adapter's in-memory map was lost
+    // (e.g. a Worker isolate recycle between begin and the webhook delivery).
+    const confirmation = await adapter.confirmFromWebhook(rawBody, signature, async (ref) => {
+      const row = await store.getCheckoutSessionByProviderReference(ref);
+      if (!row) return undefined;
+      const { purchaseId: _purchaseId, ...session } = row;
+      return session;
+    });
     if (!confirmation) return { handled: false };
     const purchase = await store.findPurchaseByProviderReference(
       confirmation.session.providerReference

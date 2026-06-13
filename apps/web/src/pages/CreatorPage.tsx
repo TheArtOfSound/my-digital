@@ -1,6 +1,6 @@
 import type { LicenseId } from "@my-digital/types";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { CreatorListingsManager } from "../components/CreatorListingsManager";
 import { CreatorPayouts } from "../components/CreatorPayouts";
 import { CreatorProfileEditor } from "../components/CreatorProfileEditor";
@@ -13,6 +13,29 @@ export function CreatorPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [payoutNotice, setPayoutNotice] = useState<string | null>(null);
+
+  // When Stripe redirects back from onboarding (?payouts=return|refresh),
+  // re-check status automatically so the creator isn't left on a stale panel.
+  useEffect(() => {
+    const flow = searchParams.get("payouts");
+    if (flow !== "return" && flow !== "refresh") return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("payouts");
+    setSearchParams(next, { replace: true });
+    setPayoutNotice("Checking your payout status with Stripe…");
+    void actions
+      .refreshPayoutStatus()
+      .then((status) =>
+        setPayoutNotice(
+          status.payoutsEnabled
+            ? "Payouts connected — buyers now pay you directly."
+            : "Stripe onboarding isn't finished yet. Use “Continue payout setup” below to complete it."
+        )
+      )
+      .catch((cause) => setPayoutNotice(cause instanceof Error ? cause.message : String(cause)));
+  }, [searchParams, setSearchParams, actions]);
 
   if (!state.creator) {
     return (
@@ -41,6 +64,11 @@ export function CreatorPage() {
 
   return (
     <>
+      {payoutNotice && (
+        <section className="panel">
+          <div className="notice">{payoutNotice}</div>
+        </section>
+      )}
       <section className="panel">
         <h2>Creator dashboard</h2>
         <dl className="kv">

@@ -205,10 +205,10 @@ export const api = {
     requestJson<TraceResult>("/api/trace", postJson({ artifactB64 })),
   getBuyerLibrary: (emailHash: string) =>
     requestJson<BuyerLibrary>(`/api/buyers/${emailHash}/library`),
-  startPayoutOnboarding: (input: { returnUrl: string; refreshUrl: string }) =>
+  startPayoutOnboarding: () =>
     requestJson<{ url: string; accountId: string }>(
       "/api/creator/payouts/onboard",
-      postJson(input)
+      postJson({})
     ),
   refreshPayoutStatus: () =>
     requestJson<{

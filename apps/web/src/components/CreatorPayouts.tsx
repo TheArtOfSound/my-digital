@@ -57,7 +57,7 @@ export function CreatorPayouts({ creator }: { creator: Creator }) {
             {connectEnabled ? (
               <span className="pill pill-pass">ON</span>
             ) : (
-              <span className="pill pill-demo">OFF — platform finishing activation</span>
+              <span className="pill pill-demo">OFF — not enabled yet</span>
             )}
           </dd>
         </div>

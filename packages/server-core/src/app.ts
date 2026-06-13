@@ -61,17 +61,28 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     return c.json({ error: message }, 400);
   });
 
-  // Creator/management actions are gated behind the admin token when one is
-  // configured. Buyer flows (checkout, verify, library, trace, unlock) stay
-  // open. Returns a 401 Response to short-circuit, or null to proceed.
-  const requireAdmin = (c: Context): Response | null => {
-    if (options.adminToken === undefined) return null;
-    const header = c.req.header("authorization");
-    if (header !== `Bearer ${options.adminToken}`) {
-      return c.json({ error: "Management token required." }, 401);
-    }
-    return null;
+  // Constant-time-ish string compare (no early-exit on content mismatch) to
+  // avoid a timing oracle on the long-lived management token.
+  const safeEqual = (a: string, b: string): boolean => {
+    if (a.length !== b.length) return false;
+    let mismatch = 0;
+    for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return mismatch === 0;
   };
+
+  // True when the request carries the management token (or none is configured,
+  // i.e. local dev). Used both to gate mutations and to decide whether the
+  // full (private) state is returned.
+  const isAdmin = (c: Context): boolean => {
+    if (options.adminToken === undefined) return true;
+    return safeEqual(c.req.header("authorization") ?? "", `Bearer ${options.adminToken}`);
+  };
+
+  // Creator/management actions are gated behind the admin token when one is
+  // configured. Buyer flows (checkout, verify, library, trace) stay open.
+  // Returns a 401 Response to short-circuit, or null to proceed.
+  const requireAdmin = (c: Context): Response | null =>
+    isAdmin(c) ? null : c.json({ error: "Management token required." }, 401);
 
   app.get("/api/health", (c) =>
     c.json({
@@ -82,7 +93,9 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     })
   );
 
-  app.get("/api/state", async (c) => c.json(await service.getState()));
+  app.get("/api/state", async (c) =>
+    c.json(await service.getState({ includePrivate: isAdmin(c) }))
+  );
 
   app.get("/api/issuer", (c) => c.json(service.issuerInfo()));
 
@@ -109,11 +122,8 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   app.post("/api/creator/payouts/onboard", async (c) => {
     const denied = requireAdmin(c);
     if (denied) return denied;
-    const body = await c.req.json<{ returnUrl: string; refreshUrl: string }>();
-    if (!body.returnUrl || !body.refreshUrl) {
-      return c.json({ error: "returnUrl and refreshUrl are required." }, 400);
-    }
-    return c.json(await service.startCreatorPayoutOnboarding(body), 201);
+    // Return URLs are derived server-side; nothing is read from the request body.
+    return c.json(await service.startCreatorPayoutOnboarding(), 201);
   });
 
   app.post("/api/creator/payouts/refresh", async (c) => {
@@ -264,12 +274,8 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   });
 
   app.post("/api/admin/reset", async (c) => {
-    if (options.adminToken !== undefined) {
-      const header = c.req.header("authorization");
-      if (header !== `Bearer ${options.adminToken}`) {
-        return c.json({ error: "Admin token required." }, 401);
-      }
-    }
+    const denied = requireAdmin(c);
+    if (denied) return denied;
     await service.reset();
     return c.json({ ok: true });
   });

@@ -35,6 +35,8 @@ export function ListingPage() {
   // The demo adapter stamps this format; the real QEV Vault V2 adapter stamps
   // BRY-NFET-SX-VAULT-V2. Drive the label from data instead of hardcoding it.
   const isDemoEnvelope = lockedAsset?.envelopeFormat === "MYDIGITAL-DEMO-ENVELOPE";
+  const isActive = listing.status === "active";
+  const canBuy = isActive && payoutReady;
 
   return (
     <>
@@ -44,22 +46,28 @@ export function ListingPage() {
         <p className="subhead">{listing.description}</p>
         <p className="listing-price-big">{formatPrice(listing.priceAmount, listing.priceCurrency)}</p>
         <div className="hero-actions">
-          {payoutReady ? (
+          {canBuy ? (
             <Link className="btn btn-primary" to={`/checkout/${listing.id}`}>
               {stripeLive ? "Buy securely with Stripe" : "Buy with mock checkout"}
             </Link>
           ) : (
             <button className="btn btn-primary" type="button" disabled>
-              Direct payouts not set up yet
+              {!isActive
+                ? listing.status === "paused"
+                  ? "Paused by the creator"
+                  : "Not available"
+                : "Direct payouts not set up yet"}
             </button>
           )}
         </div>
         <div className="notice">
-          {!payoutReady
-            ? "This creator hasn't finished connecting direct payouts, so checkout is paused. On this marketplace, payment always goes straight to the creator's own Stripe account."
-            : stripeLive
-              ? `Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is on Stripe's secure hosted checkout; card details never touch this site.${connectEnabled ? " Your payment goes directly to the creator's connected account — My Digital never holds the funds." : ""}`
-              : "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
+          {!isActive
+            ? "This listing isn't currently available for purchase."
+            : !payoutReady
+              ? "This creator hasn't finished connecting direct payouts, so checkout is paused. On this marketplace, payment always goes straight to the creator's own Stripe account."
+              : stripeLive
+                ? `Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is on Stripe's secure hosted checkout; card details never touch this site.${connectEnabled ? " Your payment goes directly to the creator's connected account — My Digital never holds the funds." : ""}`
+                : "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
         </div>
       </section>
 

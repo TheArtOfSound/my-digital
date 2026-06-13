@@ -249,7 +249,13 @@ export class StripePaymentAdapter implements PaymentAdapter, ConnectCapablePayme
   }
 
   /** Verifies a Stripe webhook and maps it to a PaymentConfirmation (or null for ignorable events). */
-  async confirmFromWebhook(rawBody: string, signature: string): Promise<PaymentConfirmation | null> {
+  async confirmFromWebhook(
+    rawBody: string,
+    signature: string,
+    resolveSession?: (
+      providerReference: string
+    ) => Promise<CheckoutSession | undefined> | CheckoutSession | undefined
+  ): Promise<PaymentConfirmation | null> {
     if (!this.options.webhookSecret) {
       throw new Error("webhookSecret is required to verify Stripe webhooks.");
     }
@@ -267,14 +273,25 @@ export class StripePaymentAdapter implements PaymentAdapter, ConnectCapablePayme
       return null;
     }
     const stripeSession = event.data.object;
-    const sessionId =
+    let sessionId =
       (stripeSession.metadata?.checkoutSessionId as CheckoutSessionId | undefined) ??
       this.byProviderReference.get(stripeSession.id);
-    if (!sessionId) {
-      throw new Error("Webhook session carries no checkoutSessionId metadata.");
+    let session = sessionId ? this.sessions.get(sessionId) : undefined;
+    // After a server/isolate recycle the in-memory session map is empty. Rehydrate
+    // the persisted session (by Stripe reference) so webhook fulfillment still works.
+    if (!session && resolveSession) {
+      const restored = await resolveSession(stripeSession.id);
+      if (restored) {
+        this.restoreSession(restored);
+        sessionId = restored.id;
+        session = this.sessions.get(restored.id);
+      }
     }
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Unknown checkout session ${sessionId} in webhook.`);
+    if (!sessionId || !session) {
+      throw new Error(
+        "Webhook session could not be resolved (no checkoutSessionId metadata and not persisted)."
+      );
+    }
     const existing = this.confirmations.get(sessionId);
     if (existing) return existing;
     const outcome =

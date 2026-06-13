@@ -604,20 +604,14 @@ describe("Direct payouts (Stripe Connect)", () => {
   it("onboarding creates a connected account; refresh records payout status", async () => {
     const { service, store, captured } = await makeConnectService();
     await seedListing(service);
-    const onboard = await service.startCreatorPayoutOnboarding({
-      returnUrl: "https://mydigital.imagineqira.com/creator?payouts=return",
-      refreshUrl: "https://mydigital.imagineqira.com/creator?payouts=refresh"
-    });
+    const onboard = await service.startCreatorPayoutOnboarding();
     expect(onboard.url).toContain("connect.stripe.com");
     expect(onboard.accountId).toBe("acct_connected_1");
     expect(captured.accountsCreated).toBe(1);
     expect((await store.listCreators())[0]?.stripeAccountId).toBe("acct_connected_1");
 
     // A second onboarding reuses the account rather than creating another.
-    await service.startCreatorPayoutOnboarding({
-      returnUrl: "https://x/return",
-      refreshUrl: "https://x/refresh"
-    });
+    await service.startCreatorPayoutOnboarding();
     expect(captured.accountsCreated).toBe(1);
 
     const status = await service.refreshCreatorPayoutStatus();
@@ -628,10 +622,7 @@ describe("Direct payouts (Stripe Connect)", () => {
   it("routes checkout to the creator's connected account with the platform fee", async () => {
     const { service, captured } = await makeConnectService();
     const { listing } = await seedListing(service);
-    await service.startCreatorPayoutOnboarding({
-      returnUrl: "https://x/r",
-      refreshUrl: "https://x/f"
-    });
+    await service.startCreatorPayoutOnboarding();
     await service.refreshCreatorPayoutStatus();
 
     const begun = await service.beginCheckout({
@@ -660,10 +651,7 @@ describe("Direct payouts (Stripe Connect)", () => {
       details_submitted: false
     });
     await seedListing(service);
-    await service.startCreatorPayoutOnboarding({
-      returnUrl: "https://x/r",
-      refreshUrl: "https://x/f"
-    });
+    await service.startCreatorPayoutOnboarding();
     const status = await service.refreshCreatorPayoutStatus();
     expect(status.payoutsEnabled).toBe(false);
     expect((await store.listCreators())[0]?.payoutsEnabled).toBe(false);

@@ -9,7 +9,7 @@ interface StatusRow {
 }
 
 export function StatusPage() {
-  const { paymentsProvider } = useMarketplace();
+  const { paymentsProvider, connectEnabled } = useMarketplace();
   const live = isLivePayments(paymentsProvider);
 
   const rows: StatusRow[] = [
@@ -44,6 +44,13 @@ export function StatusPage() {
       detail: live
         ? "Live Stripe hosted checkout. Card details never touch this site."
         : "Mock payment adapter — checkout is simulated and no charge occurs.",
+    },
+    {
+      capability: "Direct creator payouts (Stripe Connect)",
+      state: connectEnabled ? "Production" : "Planned",
+      detail: connectEnabled
+        ? "Buyers pay each creator's own connected Stripe account directly; the platform never holds creator funds."
+        : "Built and tested: direct charges route payment to the creator's own Stripe account. Not yet enabled on this instance.",
     },
     {
       capability: "Buyer accounts / persistent login",

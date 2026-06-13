@@ -247,6 +247,39 @@ describe("StripePaymentAdapter.confirmFromWebhook", () => {
     const confirmation = await adapter.confirmFromWebhook(JSON.stringify(event), "valid-signature");
     expect(confirmation?.outcome).toBe("failed");
   });
+
+  it("rehydrates a persisted session when the in-memory map was lost (isolate recycle)", async () => {
+    const state: FakeState = { created: [], session: baseStripeSession() };
+    const creator = makeAdapter(state);
+    const session = await creator.createCheckout({ listing, buyer });
+
+    // A brand-new adapter (fresh isolate) has no in-memory session.
+    const fresh = makeAdapter(state);
+    const event: StripeLikeEvent = {
+      id: "evt_recycle",
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          ...state.session,
+          status: "complete",
+          payment_status: "paid",
+          metadata: { checkoutSessionId: session.id }
+        }
+      }
+    };
+    // Without a resolver it cannot find the session and throws.
+    await expect(
+      fresh.confirmFromWebhook(JSON.stringify(event), "valid-signature")
+    ).rejects.toThrow(/could not be resolved/);
+    // With a resolver returning the persisted session, it confirms.
+    const confirmation = await fresh.confirmFromWebhook(
+      JSON.stringify(event),
+      "valid-signature",
+      (ref) => (ref === session.providerReference ? session : undefined)
+    );
+    expect(confirmation?.outcome).toBe("paid");
+    expect(confirmation?.session.id).toBe(session.id);
+  });
 });
 
 describe("StripePaymentAdapter Connect (direct payouts)", () => {

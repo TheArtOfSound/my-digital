@@ -536,11 +536,9 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       },
 
       async startPayoutOnboarding() {
-        const origin = window.location.origin;
-        return api.startPayoutOnboarding({
-          returnUrl: `${origin}/creator?payouts=return`,
-          refreshUrl: `${origin}/creator?payouts=refresh`
-        });
+        // Return URLs are derived server-side (not client-supplied) to avoid
+        // an open-redirect through the Stripe onboarding flow.
+        return api.startPayoutOnboarding();
       },
 
       async refreshPayoutStatus() {

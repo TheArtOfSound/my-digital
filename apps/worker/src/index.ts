@@ -58,6 +58,14 @@ async function getApp(env: Env): Promise<ReturnType<typeof createApp>> {
     if (!env.MYDIGITAL_MASTER_KEY_B64) {
       throw new Error("The MYDIGITAL_MASTER_KEY_B64 secret is not set.");
     }
+    // Fail closed: in production (live payments) the management endpoints must be
+    // gated. Refuse to boot rather than silently serving them open if the token
+    // is ever unset. (Use a long, random token; >= 32 chars recommended.)
+    if (env.MYDIGITAL_PAYMENTS === "stripe" && !env.MYDIGITAL_ADMIN_TOKEN) {
+      throw new Error(
+        "Live (stripe) mode requires MYDIGITAL_ADMIN_TOKEN to gate creator/management endpoints."
+      );
+    }
     const store = new D1MarketplaceStore(env.DB);
     const keystore = await Keystore.fromKeyBytes(
       base64ToBytes(env.MYDIGITAL_MASTER_KEY_B64),
@@ -76,7 +84,8 @@ async function getApp(env: Env): Promise<ReturnType<typeof createApp>> {
       verificationUrlBase: "https://mydigital.imagineqira.com/verify",
       connect: {
         enabled: env.MYDIGITAL_CONNECT === "on",
-        applicationFeeBps: Number(env.MYDIGITAL_CONNECT_FEE_BPS) || 0
+        applicationFeeBps: Number(env.MYDIGITAL_CONNECT_FEE_BPS) || 0,
+        publicBaseUrl: env.MYDIGITAL_PUBLIC_URL ?? "https://mydigital.imagineqira.com"
       }
     });
     const service = await servicePromise;
