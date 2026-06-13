@@ -220,7 +220,11 @@ export class StripePaymentAdapter implements PaymentAdapter {
   }
 }
 
-/** Builds the adapter with the real Stripe SDK (lazy import; server-side only). */
+/**
+ * Builds the adapter with the real Stripe SDK (lazy import; server-side only).
+ * Uses the fetch HTTP client and the SubtleCrypto webhook provider so the
+ * same construction works on Node 18+ and Cloudflare Workers.
+ */
 export async function createStripePaymentAdapter(options: {
   secretKey: string;
   successUrl: string;
@@ -228,7 +232,32 @@ export async function createStripePaymentAdapter(options: {
   webhookSecret?: string;
 }): Promise<StripePaymentAdapter> {
   const { default: Stripe } = await import("stripe");
-  const client = new Stripe(options.secretKey) as unknown as StripeLikeClient;
+  const stripe = new Stripe(options.secretKey, {
+    httpClient: Stripe.createFetchHttpClient()
+  });
+  const cryptoProvider = Stripe.createSubtleCryptoProvider();
+  const client: StripeLikeClient = {
+    checkout: {
+      sessions: {
+        create: async (params) =>
+          (await stripe.checkout.sessions.create(
+            params as never
+          )) as unknown as StripeLikeCheckoutSession,
+        retrieve: async (id) =>
+          (await stripe.checkout.sessions.retrieve(id)) as unknown as StripeLikeCheckoutSession
+      }
+    },
+    webhooks: {
+      constructEventAsync: async (payload, header, secret) =>
+        (await stripe.webhooks.constructEventAsync(
+          payload,
+          header,
+          secret,
+          undefined,
+          cryptoProvider
+        )) as unknown as StripeLikeEvent
+    }
+  };
   return new StripePaymentAdapter({
     client,
     successUrl: options.successUrl,

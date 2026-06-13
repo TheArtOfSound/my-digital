@@ -3,6 +3,7 @@ import type {
   AssetVersion,
   Buyer,
   BuyerLicense,
+  CheckoutSession,
   Creator,
   Fingerprint,
   LicenseId,
@@ -109,6 +110,8 @@ function postJson(body: unknown): RequestInit {
 }
 
 export const api = {
+  getHealth: () =>
+    requestJson<{ ok: boolean; envelope: string; payments: string }>("/api/health"),
   getState: () => requestJson<ServerState>("/api/state"),
   ensureCreator: (input: { displayName: string; handle: string; email: string }) =>
     requestJson<Creator>("/api/creator", postJson(input)),
@@ -135,6 +138,13 @@ export const api = {
     displayName?: string;
     simulateOutcome?: "paid" | "failed";
   }) => requestJson<ServerCheckoutOutcome>("/api/checkout", postJson(input)),
+  beginCheckout: (input: { listingId: string; email: string; displayName?: string }) =>
+    requestJson<{ purchase: Purchase; session: CheckoutSession }>(
+      "/api/checkout/begin",
+      postJson(input)
+    ),
+  completeCheckout: (input: { purchaseId?: string; providerReference?: string }) =>
+    requestJson<ServerCheckoutOutcome>("/api/checkout/complete", postJson(input)),
   fetchBuyerVault: (licenseId: LicenseId) => requestBytes(`/api/licenses/${licenseId}/vault`),
   fetchBaseLockedPayload: (lockedAssetId: LockedAssetId) =>
     requestBytes(`/api/locked-assets/${lockedAssetId}/payload`),

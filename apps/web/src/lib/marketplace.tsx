@@ -10,6 +10,7 @@ import type {
   Asset,
   AssetVersion,
   BuyerLicense,
+  CheckoutSession,
   Creator,
   LicenseId,
   LicenseTerms,
@@ -19,6 +20,7 @@ import type {
   LockedAssetId,
   ProofReceipt,
   ProofReceiptId,
+  Purchase,
   TraceResult,
   VerificationResult
 } from "@my-digital/types";
@@ -125,6 +127,15 @@ interface MarketplaceActions {
     displayName?: string;
     simulateOutcome?: "paid" | "failed";
   }): Promise<CheckoutResult>;
+  beginCheckout(input: {
+    listingId: ListingId;
+    email: string;
+    displayName?: string;
+  }): Promise<{ purchase: Purchase; session: CheckoutSession }>;
+  completeCheckout(input: {
+    purchaseId?: string;
+    providerReference?: string;
+  }): Promise<CheckoutResult>;
   fetchBuyerVault(licenseId: LicenseId): Promise<Uint8Array>;
   unlockWithCode(input: { licenseId: LicenseId; rawCode: string }): Promise<UnlockOutcome>;
   unlockVaultBytes(input: {
@@ -148,6 +159,8 @@ interface MarketplaceActions {
 interface MarketplaceContextValue {
   status: "loading" | "offline" | "unsupported" | "ready";
   unsupportedReason: string | null;
+  /** Active payment provider reported by the server ("mock" until known). */
+  paymentsProvider: string;
   state: ServerState;
   actions: MarketplaceActions;
 }
@@ -157,6 +170,7 @@ const MarketplaceContext = createContext<MarketplaceContextValue | null>(null);
 export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<MarketplaceContextValue["status"]>("loading");
   const [unsupportedReason, setUnsupportedReason] = useState<string | null>(null);
+  const [paymentsProvider, setPaymentsProvider] = useState("mock");
   const [state, setState] = useState<ServerState>(emptyServerState);
   const stateRef = useRef(state);
 
@@ -177,8 +191,11 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        await refresh();
-        if (!cancelled) setStatus("ready");
+        const [, health] = await Promise.all([refresh(), api.getHealth()]);
+        if (!cancelled) {
+          setPaymentsProvider(health.payments);
+          setStatus("ready");
+        }
       } catch {
         if (!cancelled) setStatus("offline");
       }
@@ -261,6 +278,21 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
           ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
           ...(input.simulateOutcome === "failed" ? { simulateOutcome: "failed" as const } : {})
         });
+        await refresh();
+        return outcome;
+      },
+
+      async beginCheckout(input) {
+        // No refresh: the browser is about to leave for the hosted payment page.
+        return api.beginCheckout({
+          listingId: input.listingId,
+          email: input.email,
+          ...(input.displayName !== undefined ? { displayName: input.displayName } : {})
+        });
+      },
+
+      async completeCheckout(input) {
+        const outcome = await api.completeCheckout(input);
         await refresh();
         return outcome;
       },
@@ -433,8 +465,8 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo<MarketplaceContextValue>(
-    () => ({ status, unsupportedReason, state, actions }),
-    [status, unsupportedReason, state, actions]
+    () => ({ status, unsupportedReason, paymentsProvider, state, actions }),
+    [status, unsupportedReason, paymentsProvider, state, actions]
   );
 
   return <MarketplaceContext.Provider value={value}>{children}</MarketplaceContext.Provider>;

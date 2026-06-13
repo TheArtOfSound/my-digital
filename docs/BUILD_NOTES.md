@@ -316,3 +316,17 @@ Redesign. Full restyle to a professional light identity per Bryan's direction: w
 Validation: 153 tests across 7 packages; typecheck/build green; live checks on the custom domain (health, state with real D1 records); existing-site and mail DNS verified post-migration.
 
 Remaining for full production: real-card Stripe purchase on a My Digital Stripe account (`MYDIGITAL_PAYMENTS=stripe` + secrets), buyer auth, and optionally enabling the Cloudflare proxy on the legacy site records.
+
+## 2026-06-12 live Stripe checkout on production (owner-authorized)
+
+https://mydigital.imagineqira.com now takes real card payments through Stripe's hosted checkout, using the live keys Bryan explicitly authorized (Trend account).
+
+Web redirect flow: the marketplace context reads the active payment provider from `/api/health`. In stripe mode the checkout page collects the buyer email (hashed), calls `POST /api/checkout/begin`, and redirects to the hosted session; the new `/checkout/done` page completes the purchase on return (`providerReference` from `session_id`), fulfills (license, one-time code, buyer vault, receipt), and renders the shared `PaidOutcomePanel`. Refreshing after fulfillment gets the honest already-fulfilled message with a path to the library. The mock-only declined-simulation button is hidden in stripe mode, and the masthead badge/footer state the provider truthfully.
+
+Workers-safe SDK: `createStripePaymentAdapter` now constructs Stripe with the fetch HTTP client and verifies webhooks through the SubtleCrypto provider, so the same code runs on Node 18+ and workerd.
+
+Live wiring: webhook endpoint `we_1Thgc9…` registered at Stripe for checkout.session events pointing at `/api/webhooks/stripe`; `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` set as Worker secrets (values never logged); `MYDIGITAL_PAYMENTS=stripe` deployed.
+
+Verified on production: health reports stripe (adapter constructed on workerd); `begin` minted a real live Checkout Session from the Worker with a reachable hosted page; `complete` on the open session refused honestly; after expiring the session at Stripe, `complete` settled the purchase as failed in D1 with no license minted; the live checkout page renders the Stripe flow. The expired session was cleaned up; no charges occurred.
+
+Remaining, by definition human: one real-card purchase end to end (hosted page → /checkout/done → code/vault). Revenue currently lands in the Trend Stripe account; moving to a My Digital-branded Stripe account later means swapping two Worker secrets and re-registering the webhook.

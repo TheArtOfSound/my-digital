@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes } from "react-router-dom";
 import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
+import { CheckoutDonePage } from "./pages/CheckoutDonePage";
 import { CheckoutPage } from "./pages/CheckoutPage";
 import { CreatorPage } from "./pages/CreatorPage";
 import { HomePage } from "./pages/HomePage";
@@ -14,7 +15,8 @@ import { VerifyPage } from "./pages/VerifyPage";
 import "./styles.css";
 
 function Layout() {
-  const { status, unsupportedReason } = useMarketplace();
+  const { status, unsupportedReason, paymentsProvider } = useMarketplace();
+  const stripeLive = paymentsProvider === "stripe";
 
   return (
     <div className="shell">
@@ -33,7 +35,9 @@ function Layout() {
           <NavLink to="/trace">Trace</NavLink>
           <NavLink to="/creator">Creator</NavLink>
         </div>
-        <span className="pill pill-demo">Preview — Mock Payments</span>
+        <span className="pill pill-demo">
+          {stripeLive ? "Payments by Stripe" : "Preview — Mock Payments"}
+        </span>
       </nav>
 
       {status === "loading" && (
@@ -67,9 +71,11 @@ function Layout() {
           and decrypted files are never sent to the server after purchase.
         </p>
         <p>
-          Preview build: payments are simulated and no charges occur. This product improves
-          controlled access, proof of purchase, and traceability; it does not claim to make piracy
-          impossible.
+          {stripeLive
+            ? "Payments are processed by Stripe on its hosted checkout; card details never touch this site. "
+            : "Preview build: payments are simulated and no charges occur. "}
+          This product improves controlled access, proof of purchase, and traceability; it does
+          not claim to make piracy impossible.
         </p>
       </footer>
     </div>
@@ -96,6 +102,7 @@ createRoot(document.getElementById("root")!).render(
             <Route index element={<HomePage />} />
             <Route path="/sell" element={<SellPage />} />
             <Route path="/listing/:listingId" element={<ListingPage />} />
+            <Route path="/checkout/done" element={<CheckoutDonePage />} />
             <Route path="/checkout/:listingId" element={<CheckoutPage />} />
             <Route path="/unlock" element={<UnlockPage />} />
             <Route path="/verify" element={<VerifyPage />} />

@@ -21,7 +21,7 @@
   ],
   "vars": {
     "MYDIGITAL_KDF_PRESET": "edge",
-    "MYDIGITAL_PAYMENTS": "mock",
+    "MYDIGITAL_PAYMENTS": "stripe",
     "MYDIGITAL_PUBLIC_URL": "https://mydigital.imagineqira.com"
   },
   "observability": {
