@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { VerificationResultView } from "../components/VerificationResultView";
 import { downloadBytes } from "../lib/format";
+import { COPY } from "../lib/launch";
 import {
   useMarketplace,
   type LocalVaultUnlockOutcome,
@@ -82,17 +83,17 @@ export function UnlockPage() {
   return (
     <>
       <section className="panel">
-        <h2>Unlock a purchased product</h2>
-        <p>
-          Decryption runs locally in this browser — Argon2id and XChaCha20-Poly1305 via libsodium.
-          Your unlock code and the decrypted file never leave this page; the server only delivers
-          the encrypted vault. License verification (Ed25519) also runs here, against the issuer
-          public key.
+        <h2>Open your purchase</h2>
+        <p>{COPY.unlockReframe}</p>
+        <p className="hint">
+          Under the hood: your license (Ed25519) is verified and the vault is decrypted with
+          Argon2id + XChaCha20-Poly1305 — all in this browser. Your access key and the decrypted
+          file never leave this page.
         </p>
         {licenseOptions.length === 0 ? (
           <p>
-            No licenses exist yet. <Link to="/">Buy a listing</Link> to receive a license and
-            unlock code.
+            No purchases yet. <Link to="/">Buy a listing</Link> to receive a license and an access
+            key.
           </p>
         ) : (
           <form className="form" onSubmit={onSubmit}>
@@ -108,7 +109,7 @@ export function UnlockPage() {
               </select>
             </label>
             <label className="field">
-              Unlock code (shown once at checkout)
+              Access key (shown once at checkout)
               <input
                 className="mono"
                 value={rawCode}
@@ -119,7 +120,7 @@ export function UnlockPage() {
             </label>
             {error && <p className="panel-error">{error}</p>}
             <button className="btn btn-primary" disabled={busy} type="submit">
-              {busy ? "Deriving key and decrypting…" : "Verify and unlock locally"}
+              {busy ? "Opening…" : "Open my file"}
             </button>
           </form>
         )}
@@ -187,7 +188,7 @@ export function UnlockPage() {
             />
           </label>
           <label className="field">
-            Unlock code
+            Access key
             <input
               className="mono"
               value={fileCode}
@@ -198,7 +199,7 @@ export function UnlockPage() {
           </label>
           {fileError && <p className="panel-error">{fileError}</p>}
           <button className="btn btn-primary" disabled={fileBusy} type="submit">
-            {fileBusy ? "Deriving key and decrypting…" : "Unlock file locally"}
+            {fileBusy ? "Opening…" : "Open my file"}
           </button>
         </form>
         {fileOutcome && (

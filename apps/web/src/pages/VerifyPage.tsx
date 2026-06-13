@@ -6,7 +6,11 @@ import type {
 } from "@my-digital/types";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
+import { ClaimBoundary } from "../components/ClaimBoundary";
+import { ReceiptCard } from "../components/ReceiptCard";
+import { SampleVerifyCard } from "../components/SampleVerifyCard";
 import { VerificationResultView } from "../components/VerificationResultView";
+import { SAMPLE_RECEIPT, SAMPLE_VERIFICATION } from "../lib/launch";
 import {
   useMarketplace,
   type LockedAssetVerification,
@@ -33,6 +37,13 @@ function useAsyncVerify() {
 export function VerifyPage() {
   const { state, actions } = useMarketplace();
   const { receiptId: receiptIdParam } = useParams<{ receiptId: string }>();
+
+  // No-purchase demo: verify the first locked package the marketplace serves
+  // (the seeded sample). This is a real cryptographic check, available before
+  // anyone pays — the verifier as trust center, usable up front.
+  const demoLocked = state.lockedAssets[0];
+  const [demoResult, setDemoResult] = useState<LockedAssetVerification | null>(null);
+  const demoVerify = useAsyncVerify();
 
   const [receiptId, setReceiptId] = useState("");
   const [receiptResult, setReceiptResult] = useState<VerificationResult | null>(null);
@@ -80,25 +91,73 @@ export function VerifyPage() {
 
   return (
     <>
-      <section className="panel">
-        <h2>Verify</h2>
-        <p>
-          Every verification returns a structured result: what passed, what failed, what was not
-          checked, and what is assumed. A bare “valid” badge is not trustworthy output.
+      <section className="hero hero-compact">
+        <p className="eyebrow">Imagine Qira · The trust center</p>
+        <h2 className="listing-title">Verify a receipt or package</h2>
+        <p className="subhead">
+          The verifier is the strongest part of My Digital, and you do not have to buy anything to
+          use it. Every result is structured: what was checked, what passed, what failed, what was
+          not checked, and what is assumed. A bare “valid” badge is not trustworthy output.
         </p>
-        {receiptIdParam !== undefined && !deepLinkKnown && (
-          <p className="panel-error">
-            Receipt <span className="mono">{receiptIdParam}</span> is not in this instance's
-            records. If the receipt came from elsewhere, paste its bundle below — verification
-            works from the bundle alone.
-          </p>
+        <div style={{ marginTop: "20px" }}>
+          <ClaimBoundary variant="verifier" heading="What this verifier checks — and does not" />
+        </div>
+      </section>
+
+      <section className="panel">
+        <h2>Try it now — no purchase needed</h2>
+        {demoLocked ? (
+          <>
+            <p style={{ marginBottom: "14px" }}>
+              Run a real integrity and structure check on the sample locked package the marketplace
+              is serving right now.
+            </p>
+            {demoVerify.error && <p className="panel-error">{demoVerify.error}</p>}
+            <button
+              className="btn btn-primary"
+              disabled={demoVerify.busy}
+              type="button"
+              onClick={() =>
+                void demoVerify.run(
+                  () => actions.verifyLockedAsset(demoLocked.id),
+                  setDemoResult
+                )
+              }
+            >
+              {demoVerify.busy ? "Verifying…" : "Verify the sample package"}
+            </button>
+            {demoResult && (
+              <div className="verify-stack" style={{ marginTop: "16px" }}>
+                <VerificationResultView
+                  title="Locked package integrity (recorded hashes)"
+                  result={demoResult.integrity}
+                />
+                <VerificationResultView
+                  title="Vault structure (BRY-NFET-SX-VAULT-V2)"
+                  result={demoResult.structure}
+                />
+              </div>
+            )}
+          </>
+        ) : (
+          <p>No sample package is loaded in this instance yet.</p>
         )}
+
+        <h3 style={{ marginTop: "24px" }}>What a receipt looks like</h3>
+        <p style={{ marginBottom: "14px" }}>
+          This is a sample of the receipt a buyer gets and the verifier output it produces — shown
+          before any purchase, so you know what the proof looks like.
+        </p>
+        <div className="proof-grid">
+          <ReceiptCard receipt={SAMPLE_RECEIPT} />
+          <SampleVerifyCard result={SAMPLE_VERIFICATION} />
+        </div>
       </section>
 
       <section className="panel">
         <h2>Proof receipt (stored)</h2>
         {state.receipts.length === 0 ? (
-          <p>No receipts in this browser yet.</p>
+          <p>No receipts in this browser yet — make a purchase, or paste a receipt bundle below.</p>
         ) : (
           <div className="form">
             <label className="field">
@@ -211,7 +270,7 @@ export function VerifyPage() {
       </section>
 
       <section className="panel">
-        <h2>Locked package integrity</h2>
+        <h2>Locked package integrity (advanced)</h2>
         {lockedAssetOptions.length === 0 ? (
           <p>No locked assets in this browser yet.</p>
         ) : (

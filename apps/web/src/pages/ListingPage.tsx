@@ -1,5 +1,7 @@
 import { Link, useParams } from "react-router-dom";
+import { BUYER_FLOW, FlowStepper } from "../components/FlowStepper";
 import { LicenseTermsView } from "../components/LicenseTermsView";
+import { ProofPreview } from "../components/ProofPreview";
 import { formatPrice, shortHash } from "../lib/format";
 import { useMarketplace } from "../lib/marketplace";
 
@@ -44,9 +46,16 @@ export function ListingPage() {
         </div>
         <div className="notice">
           {stripeLive
-            ? "Buying issues a buyer-specific license, a one-time-shown unlock code, and a signed proof receipt. Payment is processed by Stripe on its secure hosted checkout; card details never touch this site."
-            : "Buying issues a buyer-specific license, a one-time-shown unlock code, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
+            ? "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is processed by Stripe on its secure hosted checkout; card details never touch this site."
+            : "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
         </div>
+      </section>
+
+      <ProofPreview heading="What you receive when you buy this" />
+
+      <section className="panel">
+        <h2>How you'll get it</h2>
+        <FlowStepper steps={BUYER_FLOW} />
       </section>
 
       <section className="panel">

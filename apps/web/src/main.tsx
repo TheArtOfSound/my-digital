@@ -1,15 +1,18 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Link, NavLink, Outlet, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, NavLink, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { isLivePayments } from "./lib/launch";
 import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
-import { BackUsPage } from "./pages/BackUsPage";
 import { CheckoutDonePage } from "./pages/CheckoutDonePage";
 import { CheckoutPage } from "./pages/CheckoutPage";
 import { CreatorPage } from "./pages/CreatorPage";
+import { DocsQevPage } from "./pages/DocsQevPage";
+import { FundingPage } from "./pages/FundingPage";
 import { HomePage } from "./pages/HomePage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { ListingPage } from "./pages/ListingPage";
 import { SellPage } from "./pages/SellPage";
+import { StatusPage } from "./pages/StatusPage";
 import { TracePage } from "./pages/TracePage";
 import { UnlockPage } from "./pages/UnlockPage";
 import { VerifyPage } from "./pages/VerifyPage";
@@ -17,7 +20,7 @@ import "./styles.css";
 
 function Layout() {
   const { status, unsupportedReason, paymentsProvider } = useMarketplace();
-  const stripeLive = paymentsProvider === "stripe";
+  const live = isLivePayments(paymentsProvider);
 
   return (
     <div className="shell">
@@ -35,11 +38,12 @@ function Layout() {
           </NavLink>
           <NavLink to="/trace">Trace</NavLink>
           <NavLink to="/creator">Creator</NavLink>
-          <NavLink to="/back">Back Us</NavLink>
+          <NavLink to="/funding">Funding</NavLink>
+          <NavLink to="/docs/qev">Docs</NavLink>
         </div>
-        <span className="pill pill-demo">
-          {stripeLive ? "Payments by Stripe" : "Preview — Mock Payments"}
-        </span>
+        <NavLink to="/status" className="pill pill-demo" style={{ textDecoration: "none" }}>
+          {live ? "Payments by Stripe" : "Preview — Mock Payments"}
+        </NavLink>
       </nav>
 
       {status === "loading" && (
@@ -67,17 +71,21 @@ function Layout() {
       <footer className="footer">
         <p className="footer-brand">My Digital — An Imagine Qira Company</p>
         <p>
-          Every asset sold here is locked into a QEV envelope (Qira Encryption Vault, schema
-          BRY-NFET-SX-VAULT-V2, Argon2id and XChaCha20-Poly1305). Custody secrets are sealed under
-          the server master key. Unlock and decryption run locally in your browser; unlock codes
-          and decrypted files are never sent to the server after purchase.
+          Verified receipts for digital downloads. Buyer-specific licenses, local unlocks, and
+          public artifact verification, on QEV Vault V2 cryptography (schema BRY-NFET-SX-VAULT-V2,
+          Argon2id and XChaCha20-Poly1305). Unlock and decryption run locally; access keys and
+          decrypted files are never sent to the server after purchase.
         </p>
         <p>
-          {stripeLive
+          {live
             ? "Payments are processed by Stripe on its hosted checkout; card details never touch this site. "
             : "Preview build: payments are simulated and no charges occur. "}
-          This product improves controlled access, proof of purchase, and traceability; it does
-          not claim to make piracy impossible.
+          My Digital does not make copying impossible after unlock — it provides license records,
+          receipts, integrity, and traceability.
+        </p>
+        <p>
+          <Link to="/status">Status</Link> · <Link to="/docs/qev">Trust docs</Link> ·{" "}
+          <Link to="/verify">Verifier</Link> · <Link to="/funding">Back the launch</Link>
         </p>
       </footer>
     </div>
@@ -104,7 +112,11 @@ createRoot(document.getElementById("root")!).render(
             <Route index element={<HomePage />} />
             <Route path="/sell" element={<SellPage />} />
             <Route path="/listing/:listingId" element={<ListingPage />} />
-            <Route path="/back" element={<BackUsPage />} />
+            <Route path="/funding" element={<FundingPage />} />
+            {/* /back was the original fundraising route; keep the link alive. */}
+            <Route path="/back" element={<Navigate to="/funding" replace />} />
+            <Route path="/status" element={<StatusPage />} />
+            <Route path="/docs/qev" element={<DocsQevPage />} />
             <Route path="/checkout/done" element={<CheckoutDonePage />} />
             <Route path="/checkout/:listingId" element={<CheckoutPage />} />
             <Route path="/unlock" element={<UnlockPage />} />
