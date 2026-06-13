@@ -13,6 +13,7 @@ import type {
   LockedAssetId,
   ProofReceipt,
   ProofReceiptId,
+  PublicUser,
   Purchase,
   Revocation,
   TraceResult,
@@ -140,6 +141,12 @@ export const api = {
     requestJson<{ ok: boolean; envelope: string; payments: string; connect?: boolean }>(
       "/api/health"
     ),
+  authMe: () => requestJson<{ user: PublicUser | null }>("/api/auth/me"),
+  authSignup: (input: { email: string; password: string; displayName: string }) =>
+    requestJson<{ user: PublicUser }>("/api/auth/signup", postJson(input)),
+  authLogin: (input: { email: string; password: string }) =>
+    requestJson<{ user: PublicUser }>("/api/auth/login", postJson(input)),
+  authLogout: () => requestJson<{ ok: boolean }>("/api/auth/logout", postJson({})),
   getState: () => requestJson<ServerState>("/api/state"),
   ensureCreator: (input: { displayName: string; handle: string; email: string }) =>
     requestJson<Creator>("/api/creator", postJson(input)),

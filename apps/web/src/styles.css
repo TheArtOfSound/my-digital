@@ -142,6 +142,54 @@ a:hover {
   border-bottom-color: var(--ink);
 }
 
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  white-space: nowrap;
+}
+
+.account-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.account-menu a:not(.btn),
+.linklike {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.account-menu a:not(.btn):hover,
+.linklike:hover {
+  color: var(--ink);
+}
+
+.account-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.muted-text {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
 .footer {
   margin-top: 48px;
   padding-top: 18px;

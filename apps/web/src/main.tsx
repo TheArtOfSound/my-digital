@@ -1,8 +1,19 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Link, NavLink, Navigate, Outlet, Route, Routes } from "react-router-dom";
+import {
+  BrowserRouter,
+  Link,
+  NavLink,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useNavigate
+} from "react-router-dom";
+import { AuthProvider, useAuth } from "./lib/auth";
 import { isLivePayments } from "./lib/launch";
 import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
+import { AuthPage } from "./pages/AuthPage";
 import { CheckoutDonePage } from "./pages/CheckoutDonePage";
 import { CheckoutPage } from "./pages/CheckoutPage";
 import { CreatorPage } from "./pages/CreatorPage";
@@ -17,6 +28,39 @@ import { TracePage } from "./pages/TracePage";
 import { UnlockPage } from "./pages/UnlockPage";
 import { VerifyPage } from "./pages/VerifyPage";
 import "./styles.css";
+
+function AccountMenu() {
+  const { user, status, logout } = useAuth();
+  const navigate = useNavigate();
+  if (status === "loading") return null;
+  if (!user) {
+    return (
+      <span className="account-menu">
+        <NavLink to="/login">Log in</NavLink>
+        <NavLink to="/signup" className="btn btn-ghost btn-small">
+          Sign up
+        </NavLink>
+      </span>
+    );
+  }
+  return (
+    <span className="account-menu">
+      <NavLink to="/creator" title={user.email} className="account-name">
+        {user.displayName}
+      </NavLink>
+      <button
+        type="button"
+        className="linklike"
+        onClick={async () => {
+          await logout();
+          navigate("/");
+        }}
+      >
+        Log out
+      </button>
+    </span>
+  );
+}
 
 function Layout() {
   const { status, unsupportedReason, paymentsProvider } = useMarketplace();
@@ -41,9 +85,12 @@ function Layout() {
           <NavLink to="/funding">Funding</NavLink>
           <NavLink to="/docs/qev">Docs</NavLink>
         </div>
-        <NavLink to="/status" className="pill pill-demo" style={{ textDecoration: "none" }}>
-          {live ? "Payments by Stripe" : "Preview — Mock Payments"}
-        </NavLink>
+        <div className="nav-right">
+          <NavLink to="/status" className="pill pill-demo" style={{ textDecoration: "none" }}>
+            {live ? "Payments by Stripe" : "Preview — Mock Payments"}
+          </NavLink>
+          <AccountMenu />
+        </div>
       </nav>
 
       {status === "loading" && (
@@ -106,13 +153,16 @@ function NotFoundPage() {
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <MarketplaceProvider>
-      <BrowserRouter>
-        <Routes>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
           <Route element={<Layout />}>
             <Route index element={<HomePage />} />
             <Route path="/sell" element={<SellPage />} />
             <Route path="/listing/:listingId" element={<ListingPage />} />
             <Route path="/funding" element={<FundingPage />} />
+            <Route path="/login" element={<AuthPage mode="login" />} />
+            <Route path="/signup" element={<AuthPage mode="signup" />} />
             {/* /back was the original fundraising route; keep the link alive. */}
             <Route path="/back" element={<Navigate to="/funding" replace />} />
             <Route path="/status" element={<StatusPage />} />
@@ -127,8 +177,9 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/creator" element={<CreatorPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
-        </Routes>
-      </BrowserRouter>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </MarketplaceProvider>
   </React.StrictMode>
 );
