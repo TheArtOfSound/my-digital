@@ -8,8 +8,11 @@ import { useMarketplace } from "../lib/marketplace";
 
 export function ListingPage() {
   const { listingId } = useParams<{ listingId: string }>();
-  const { state, paymentsProvider } = useMarketplace();
+  const { state, paymentsProvider, connectEnabled } = useMarketplace();
   const stripeLive = paymentsProvider === "stripe";
+  // In direct-payout mode the creator must have connected payouts before buyers
+  // can purchase (so funds always reach the creator, never the platform).
+  const payoutReady = !connectEnabled || state.creator?.payoutsEnabled === true;
 
   const listing = state.listings.find((entry) => entry.id === listingId);
   if (!listing) {
@@ -41,14 +44,22 @@ export function ListingPage() {
         <p className="subhead">{listing.description}</p>
         <p className="listing-price-big">{formatPrice(listing.priceAmount, listing.priceCurrency)}</p>
         <div className="hero-actions">
-          <Link className="btn btn-primary" to={`/checkout/${listing.id}`}>
-            {stripeLive ? "Buy securely with Stripe" : "Buy with mock checkout"}
-          </Link>
+          {payoutReady ? (
+            <Link className="btn btn-primary" to={`/checkout/${listing.id}`}>
+              {stripeLive ? "Buy securely with Stripe" : "Buy with mock checkout"}
+            </Link>
+          ) : (
+            <button className="btn btn-primary" type="button" disabled>
+              Direct payouts not set up yet
+            </button>
+          )}
         </div>
         <div className="notice">
-          {stripeLive
-            ? "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is processed by Stripe on its secure hosted checkout; card details never touch this site."
-            : "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
+          {!payoutReady
+            ? "This creator hasn't finished connecting direct payouts, so checkout is paused. On this marketplace, payment always goes straight to the creator's own Stripe account."
+            : stripeLive
+              ? `Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is on Stripe's secure hosted checkout; card details never touch this site.${connectEnabled ? " Your payment goes directly to the creator's connected account — My Digital never holds the funds." : ""}`
+              : "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
         </div>
       </section>
 

@@ -44,11 +44,26 @@ export interface StripeLikeEvent {
   data: { object: StripeLikeCheckoutSession };
 }
 
+/** Per-request options; `stripeAccount` routes the call to a connected account. */
+export interface StripeRequestOptions {
+  stripeAccount?: string;
+}
+
+export interface StripeLikeAccount {
+  id: string;
+  charges_enabled?: boolean | null;
+  payouts_enabled?: boolean | null;
+  details_submitted?: boolean | null;
+}
+
 export interface StripeLikeClient {
   checkout: {
     sessions: {
-      create(params: Record<string, unknown>): Promise<StripeLikeCheckoutSession>;
-      retrieve(id: string): Promise<StripeLikeCheckoutSession>;
+      create(
+        params: Record<string, unknown>,
+        options?: StripeRequestOptions
+      ): Promise<StripeLikeCheckoutSession>;
+      retrieve(id: string, options?: StripeRequestOptions): Promise<StripeLikeCheckoutSession>;
     };
   };
   webhooks: {
@@ -58,6 +73,27 @@ export interface StripeLikeClient {
       secret: string
     ): Promise<StripeLikeEvent>;
   };
+  // Connect (optional): present only on clients built for direct-payout mode.
+  accounts?: {
+    create(params: Record<string, unknown>): Promise<StripeLikeAccount>;
+    retrieve(id: string): Promise<StripeLikeAccount>;
+  };
+  accountLinks?: {
+    create(params: Record<string, unknown>): Promise<{ url: string }>;
+  };
+}
+
+/** Direct-payout (Stripe Connect) operations, feature-detected by the service. */
+export interface ConnectCapablePaymentAdapter {
+  createConnectedAccount(input: { email?: string }): Promise<string>;
+  createOnboardingLink(input: {
+    accountId: string;
+    refreshUrl: string;
+    returnUrl: string;
+  }): Promise<string>;
+  getAccountStatus(
+    accountId: string
+  ): Promise<{ chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean }>;
 }
 
 export interface StripePaymentAdapterOptions {
@@ -69,7 +105,7 @@ export interface StripePaymentAdapterOptions {
   webhookSecret?: string;
 }
 
-export class StripePaymentAdapter implements PaymentAdapter {
+export class StripePaymentAdapter implements PaymentAdapter, ConnectCapablePaymentAdapter {
   private sessions = new Map<CheckoutSessionId, CheckoutSession>();
   private byProviderReference = new Map<string, CheckoutSessionId>();
   private confirmations = new Map<CheckoutSessionId, PaymentConfirmation>();
@@ -81,7 +117,8 @@ export class StripePaymentAdapter implements PaymentAdapter {
       throw new Error(`Cannot create checkout: listing ${input.listing.id} is not active.`);
     }
     const sessionId = newCheckoutSessionId();
-    const stripeSession = await this.options.client.checkout.sessions.create({
+    const directCharge = input.connectedAccountId !== undefined;
+    const params: Record<string, unknown> = {
       mode: "payment",
       line_items: [
         {
@@ -99,8 +136,19 @@ export class StripePaymentAdapter implements PaymentAdapter {
         checkoutSessionId: sessionId as string,
         listingId: input.listing.id as string,
         buyerId: input.buyer.id as string
-      }
-    });
+      },
+      // Direct charge on the creator's connected account: the platform takes
+      // only an application fee (if any); funds settle to the creator, never
+      // to the platform balance.
+      ...(directCharge && input.applicationFeeAmount && input.applicationFeeAmount > 0
+        ? { payment_intent_data: { application_fee_amount: input.applicationFeeAmount } }
+        : {})
+    };
+    const requestOptions =
+      input.connectedAccountId !== undefined
+        ? { stripeAccount: input.connectedAccountId }
+        : undefined;
+    const stripeSession = await this.options.client.checkout.sessions.create(params, requestOptions);
     const session: CheckoutSession = {
       id: sessionId,
       listingId: input.listing.id,
@@ -111,11 +159,62 @@ export class StripePaymentAdapter implements PaymentAdapter {
       provider: "stripe",
       providerReference: stripeSession.id,
       createdAt: new Date().toISOString(),
-      ...(stripeSession.url ? { checkoutUrl: stripeSession.url } : {})
+      ...(stripeSession.url ? { checkoutUrl: stripeSession.url } : {}),
+      ...(directCharge ? { connectedAccountId: input.connectedAccountId } : {})
     };
     this.sessions.set(session.id, session);
     this.byProviderReference.set(stripeSession.id, session.id);
     return session;
+  }
+
+  private requireAccounts(): NonNullable<StripeLikeClient["accounts"]> {
+    if (!this.options.client.accounts) {
+      throw new Error("This Stripe client was not built with Connect (accounts) support.");
+    }
+    return this.options.client.accounts;
+  }
+
+  async createConnectedAccount(input: { email?: string }): Promise<string> {
+    const accounts = this.requireAccounts();
+    const account = await accounts.create({
+      type: "express",
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true }
+      },
+      ...(input.email ? { email: input.email } : {})
+    });
+    return account.id;
+  }
+
+  async createOnboardingLink(input: {
+    accountId: string;
+    refreshUrl: string;
+    returnUrl: string;
+  }): Promise<string> {
+    const links = this.options.client.accountLinks;
+    if (!links) {
+      throw new Error("This Stripe client was not built with Connect (accountLinks) support.");
+    }
+    const link = await links.create({
+      account: input.accountId,
+      refresh_url: input.refreshUrl,
+      return_url: input.returnUrl,
+      type: "account_onboarding"
+    });
+    return link.url;
+  }
+
+  async getAccountStatus(
+    accountId: string
+  ): Promise<{ chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean }> {
+    const accounts = this.requireAccounts();
+    const account = await accounts.retrieve(accountId);
+    return {
+      chargesEnabled: account.charges_enabled === true,
+      payoutsEnabled: account.payouts_enabled === true,
+      detailsSubmitted: account.details_submitted === true
+    };
   }
 
   restoreSession(session: CheckoutSession): void {
@@ -135,7 +234,8 @@ export class StripePaymentAdapter implements PaymentAdapter {
     if (existing) return existing;
 
     const stripeSession = await this.options.client.checkout.sessions.retrieve(
-      session.providerReference
+      session.providerReference,
+      session.connectedAccountId ? { stripeAccount: session.connectedAccountId } : undefined
     );
     if (stripeSession.payment_status === "paid") {
       return this.recordConfirmation(session, stripeSession, "paid", `poll_${stripeSession.id}`);
@@ -239,12 +339,17 @@ export async function createStripePaymentAdapter(options: {
   const client: StripeLikeClient = {
     checkout: {
       sessions: {
-        create: async (params) =>
+        create: async (params, options) =>
           (await stripe.checkout.sessions.create(
-            params as never
+            params as never,
+            options as never
           )) as unknown as StripeLikeCheckoutSession,
-        retrieve: async (id) =>
-          (await stripe.checkout.sessions.retrieve(id)) as unknown as StripeLikeCheckoutSession
+        retrieve: async (id, options) =>
+          (await stripe.checkout.sessions.retrieve(
+            id,
+            undefined,
+            options as never
+          )) as unknown as StripeLikeCheckoutSession
       }
     },
     webhooks: {
@@ -256,6 +361,16 @@ export async function createStripePaymentAdapter(options: {
           undefined,
           cryptoProvider
         )) as unknown as StripeLikeEvent
+    },
+    accounts: {
+      create: async (params) =>
+        (await stripe.accounts.create(params as never)) as unknown as StripeLikeAccount,
+      retrieve: async (id) =>
+        (await stripe.accounts.retrieve(id)) as unknown as StripeLikeAccount
+    },
+    accountLinks: {
+      create: async (params) =>
+        (await stripe.accountLinks.create(params as never)) as unknown as { url: string }
     }
   };
   return new StripePaymentAdapter({

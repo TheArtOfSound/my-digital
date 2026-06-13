@@ -60,7 +60,9 @@ export function rowToCreator(row: CreatorRow): Creator {
     ...opt("publicSigningKey", row.publicSigningKey),
     ...opt("bio", row.bio),
     ...opt("avatarUrl", row.avatarUrl),
-    ...opt("websiteUrl", row.websiteUrl)
+    ...opt("websiteUrl", row.websiteUrl),
+    ...opt("stripeAccountId", row.stripeAccountId),
+    ...opt("payoutsEnabled", row.payoutsEnabled)
   };
 }
 
@@ -144,6 +146,7 @@ export function rowToCheckoutSession(row: CheckoutSessionRow): StoredCheckoutSes
     providerReference: row.providerReference,
     createdAt: row.createdAt,
     ...opt("checkoutUrl", row.checkoutUrl),
+    ...opt("connectedAccountId", row.connectedAccountId),
     ...opt("completedAt", row.completedAt)
   };
 }

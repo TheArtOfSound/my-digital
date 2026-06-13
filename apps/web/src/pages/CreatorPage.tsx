@@ -2,15 +2,17 @@ import type { LicenseId } from "@my-digital/types";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { CreatorListingsManager } from "../components/CreatorListingsManager";
+import { CreatorPayouts } from "../components/CreatorPayouts";
 import { CreatorProfileEditor } from "../components/CreatorProfileEditor";
 import { CreatorSetup } from "../components/CreatorSetup";
 import { copyToClipboard, downloadJson, formatDate, formatPrice, shortHash, shortId } from "../lib/format";
 import { useMarketplace } from "../lib/marketplace";
 
 export function CreatorPage() {
-  const { state, actions } = useMarketplace();
+  const { state, actions, hasAdminToken } = useMarketplace();
   const [error, setError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [tokenInput, setTokenInput] = useState("");
 
   if (!state.creator) {
     return (
@@ -83,6 +85,52 @@ export function CreatorPage() {
         </div>
         {error && <p className="panel-error">{error}</p>}
       </section>
+
+      <section className="panel">
+        <h2>Management access</h2>
+        <p>
+          Editing your profile, managing listings, and connecting payouts require the management
+          token (the server&rsquo;s admin token). It is stored only in this browser and sent as a
+          bearer header on management requests. Buyers never need it.
+        </p>
+        {hasAdminToken ? (
+          <div className="hero-actions">
+            <span className="pill pill-pass">MANAGEMENT ENABLED</span>
+            <button
+              className="btn btn-ghost btn-small"
+              type="button"
+              onClick={() => actions.setAdminToken(undefined)}
+            >
+              Clear token
+            </button>
+          </div>
+        ) : (
+          <form
+            className="form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              actions.setAdminToken(tokenInput);
+              setTokenInput("");
+            }}
+          >
+            <label className="field">
+              Management token
+              <input
+                type="password"
+                value={tokenInput}
+                onChange={(event) => setTokenInput(event.target.value)}
+                placeholder="paste the admin token"
+                autoComplete="off"
+              />
+            </label>
+            <button className="btn btn-primary" type="submit" disabled={tokenInput.trim().length === 0}>
+              Enable management
+            </button>
+          </form>
+        )}
+      </section>
+
+      <CreatorPayouts creator={creator} />
 
       <CreatorProfileEditor creator={creator} />
 

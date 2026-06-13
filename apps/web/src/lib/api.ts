@@ -71,8 +71,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Optional management (admin) token. When set, it is sent as a Bearer header so
+ * the creator console can call gated endpoints (profile, listings, payouts).
+ * Buyer flows work without it. Held in module scope; the UI persists it.
+ */
+let adminToken: string | undefined;
+export function setApiAdminToken(token: string | undefined): void {
+  adminToken = token && token.length > 0 ? token : undefined;
+}
+
+function withAuth(init?: RequestInit): RequestInit | undefined {
+  if (!adminToken) return init;
+  return {
+    ...init,
+    headers: { ...(init?.headers as Record<string, string> | undefined), Authorization: `Bearer ${adminToken}` }
+  };
+}
+
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
+  const response = await fetch(path, withAuth(init));
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
@@ -87,7 +105,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function requestBytes(path: string): Promise<Uint8Array> {
-  const response = await fetch(path);
+  const response = await fetch(path, withAuth());
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
@@ -119,7 +137,9 @@ function sendJson(method: string, body?: unknown): RequestInit {
 
 export const api = {
   getHealth: () =>
-    requestJson<{ ok: boolean; envelope: string; payments: string }>("/api/health"),
+    requestJson<{ ok: boolean; envelope: string; payments: string; connect?: boolean }>(
+      "/api/health"
+    ),
   getState: () => requestJson<ServerState>("/api/state"),
   ensureCreator: (input: { displayName: string; handle: string; email: string }) =>
     requestJson<Creator>("/api/creator", postJson(input)),
@@ -185,5 +205,17 @@ export const api = {
     requestJson<TraceResult>("/api/trace", postJson({ artifactB64 })),
   getBuyerLibrary: (emailHash: string) =>
     requestJson<BuyerLibrary>(`/api/buyers/${emailHash}/library`),
+  startPayoutOnboarding: (input: { returnUrl: string; refreshUrl: string }) =>
+    requestJson<{ url: string; accountId: string }>(
+      "/api/creator/payouts/onboard",
+      postJson(input)
+    ),
+  refreshPayoutStatus: () =>
+    requestJson<{
+      stripeAccountId?: string;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      detailsSubmitted: boolean;
+    }>("/api/creator/payouts/refresh", postJson({})),
   reset: () => requestJson<{ ok: boolean }>("/api/admin/reset", { method: "POST" })
 };

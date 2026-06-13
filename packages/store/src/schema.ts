@@ -16,7 +16,9 @@ export const creators = sqliteTable("creators", {
   publicSigningKey: text("public_signing_key"),
   bio: text("bio"),
   avatarUrl: text("avatar_url"),
-  websiteUrl: text("website_url")
+  websiteUrl: text("website_url"),
+  stripeAccountId: text("stripe_account_id"),
+  payoutsEnabled: integer("payouts_enabled", { mode: "boolean" })
 });
 
 export const buyers = sqliteTable("buyers", {
@@ -212,6 +214,7 @@ export const checkoutSessions = sqliteTable("checkout_sessions", {
   provider: text("provider").notNull(),
   providerReference: text("provider_reference").notNull(),
   checkoutUrl: text("checkout_url"),
+  connectedAccountId: text("connected_account_id"),
   createdAt: text("created_at").notNull(),
   completedAt: text("completed_at")
 });

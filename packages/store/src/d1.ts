@@ -109,7 +109,9 @@ export class D1MarketplaceStore implements MarketplaceStore {
         publicSigningKey: creator.publicSigningKey ?? null,
         bio: creator.bio ?? null,
         avatarUrl: creator.avatarUrl ?? null,
-        websiteUrl: creator.websiteUrl ?? null
+        websiteUrl: creator.websiteUrl ?? null,
+        stripeAccountId: creator.stripeAccountId ?? null,
+        payoutsEnabled: creator.payoutsEnabled ?? null
       })
       .where(eq(schema.creators.id, creator.id));
   }
@@ -400,6 +402,7 @@ export class D1MarketplaceStore implements MarketplaceStore {
     await this.db.insert(schema.checkoutSessions).values({
       ...session,
       checkoutUrl: session.checkoutUrl ?? null,
+      connectedAccountId: session.connectedAccountId ?? null,
       completedAt: session.completedAt ?? null
     });
   }

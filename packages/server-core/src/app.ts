@@ -8,7 +8,7 @@ import type {
   ProofReceiptId,
   PurchaseId
 } from "@my-digital/types";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { MarketplaceService } from "./service";
 
 export interface CreateAppOptions {
@@ -61,8 +61,25 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     return c.json({ error: message }, 400);
   });
 
+  // Creator/management actions are gated behind the admin token when one is
+  // configured. Buyer flows (checkout, verify, library, trace, unlock) stay
+  // open. Returns a 401 Response to short-circuit, or null to proceed.
+  const requireAdmin = (c: Context): Response | null => {
+    if (options.adminToken === undefined) return null;
+    const header = c.req.header("authorization");
+    if (header !== `Bearer ${options.adminToken}`) {
+      return c.json({ error: "Management token required." }, 401);
+    }
+    return null;
+  };
+
   app.get("/api/health", (c) =>
-    c.json({ ok: true, envelope: QEV_VAULT_SCHEMA, payments: options.paymentsProvider ?? "mock" })
+    c.json({
+      ok: true,
+      envelope: QEV_VAULT_SCHEMA,
+      payments: options.paymentsProvider ?? "mock",
+      connect: service.connectEnabled()
+    })
   );
 
   app.get("/api/state", async (c) => c.json(await service.getState()));
@@ -70,11 +87,15 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   app.get("/api/issuer", (c) => c.json(service.issuerInfo()));
 
   app.post("/api/creator", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
     const body = await c.req.json<{ displayName: string; handle: string; email: string }>();
     return c.json(await service.ensureCreator(body), 201);
   });
 
   app.patch("/api/creator", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
     const body = await c.req.json<{
       displayName?: string;
       handle?: string;
@@ -85,7 +106,25 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     return c.json(await service.updateCreatorProfile(body));
   });
 
+  app.post("/api/creator/payouts/onboard", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
+    const body = await c.req.json<{ returnUrl: string; refreshUrl: string }>();
+    if (!body.returnUrl || !body.refreshUrl) {
+      return c.json({ error: "returnUrl and refreshUrl are required." }, 400);
+    }
+    return c.json(await service.startCreatorPayoutOnboarding(body), 201);
+  });
+
+  app.post("/api/creator/payouts/refresh", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
+    return c.json(await service.refreshCreatorPayoutStatus());
+  });
+
   app.post("/api/listings", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
     const body = await c.req.json<CreateListingBody>();
     if (typeof body.payloadB64 !== "string" || body.payloadB64.length > 1_400_000) {
       return c.json({ error: "Payload is missing or exceeds the 1 MB limit." }, 413);
@@ -105,6 +144,8 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   });
 
   app.patch("/api/listings/:id", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
     const body = await c.req.json<{
       title?: string;
       description?: string;
@@ -117,9 +158,11 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     );
   });
 
-  app.delete("/api/listings/:id", async (c) =>
-    c.json(await service.deleteListing(c.req.param("id") as ListingId))
-  );
+  app.delete("/api/listings/:id", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
+    return c.json(await service.deleteListing(c.req.param("id") as ListingId));
+  });
 
   app.post("/api/checkout", async (c) => {
     const body = await c.req.json<CheckoutBody>();
@@ -183,6 +226,8 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   });
 
   app.post("/api/licenses/:id/revoke", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
     const body = await c.req.json<{ reason?: string }>().catch(() => ({ reason: undefined }));
     const revocation = await service.revokeLicense(
       c.req.param("id") as LicenseId,

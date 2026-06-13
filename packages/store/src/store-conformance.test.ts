@@ -224,20 +224,24 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.listCreators()).toEqual([creator]);
     });
 
-    it("updates a creator's profile fields and clears optional ones", async () => {
+    it("updates a creator's profile + payout fields and clears optional ones", async () => {
       await store.updateCreator({
         ...creator,
         displayName: "Renamed",
         bio: "Maker of proofs",
         avatarUrl: "https://cdn.example.com/a.png",
-        websiteUrl: "https://example.com"
+        websiteUrl: "https://example.com",
+        stripeAccountId: "acct_creator_1",
+        payoutsEnabled: true
       });
       expect(await store.getCreator(creator.id)).toEqual({
         ...creator,
         displayName: "Renamed",
         bio: "Maker of proofs",
         avatarUrl: "https://cdn.example.com/a.png",
-        websiteUrl: "https://example.com"
+        websiteUrl: "https://example.com",
+        stripeAccountId: "acct_creator_1",
+        payoutsEnabled: true
       });
       // Restore the base creator (optional fields cleared) for later tests.
       await store.updateCreator(creator);
@@ -360,6 +364,7 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
         status: "open" as const,
         provider: "mock" as const,
         providerReference: "mockpay_conf",
+        connectedAccountId: "acct_creator_1",
         createdAt: NOW
       };
       await store.insertCheckoutSession(session);

@@ -18,6 +18,10 @@ export interface Env {
   MYDIGITAL_ADMIN_TOKEN?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  /** "on" routes checkout to each creator's connected Stripe account (direct payouts). */
+  MYDIGITAL_CONNECT?: string;
+  /** Platform application fee in basis points when Connect is on (default 0). */
+  MYDIGITAL_CONNECT_FEE_BPS?: string;
 }
 
 // The service is built once per isolate and reused across requests.
@@ -69,7 +73,11 @@ async function getApp(env: Env): Promise<ReturnType<typeof createApp>> {
       }),
       payments: payments.adapter,
       issuerName: "my-digital-issuer",
-      verificationUrlBase: "https://mydigital.imagineqira.com/verify"
+      verificationUrlBase: "https://mydigital.imagineqira.com/verify",
+      connect: {
+        enabled: env.MYDIGITAL_CONNECT === "on",
+        applicationFeeBps: Number(env.MYDIGITAL_CONNECT_FEE_BPS) || 0
+      }
     });
     const service = await servicePromise;
     return createApp(service, {

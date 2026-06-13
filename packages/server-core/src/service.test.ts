@@ -521,6 +521,155 @@ describe("Stripe-adapter service flow (fake client)", () => {
   });
 });
 
+describe("Direct payouts (Stripe Connect)", () => {
+  async function makeConnectService(accountStatus?: {
+    charges_enabled: boolean;
+    payouts_enabled: boolean;
+    details_submitted: boolean;
+  }) {
+    const stripeSession = {
+      id: "cs_connect_flow",
+      url: "https://checkout.stripe.com/c/pay/cs_connect_flow",
+      status: "open",
+      payment_status: "unpaid",
+      amount_total: 1900,
+      currency: "usd",
+      metadata: {} as Record<string, string>
+    };
+    const captured: {
+      createOptions?: { stripeAccount?: string } | undefined;
+      lastParams?: Record<string, unknown>;
+      accountsCreated: number;
+    } = { accountsCreated: 0 };
+    const status = accountStatus ?? {
+      charges_enabled: true,
+      payouts_enabled: true,
+      details_submitted: true
+    };
+    const client: StripeLikeClient = {
+      checkout: {
+        sessions: {
+          async create(params, options) {
+            stripeSession.metadata = (params as { metadata: Record<string, string> }).metadata;
+            captured.createOptions = options;
+            captured.lastParams = params;
+            return stripeSession;
+          },
+          async retrieve() {
+            return stripeSession;
+          }
+        }
+      },
+      webhooks: {
+        async constructEventAsync(payload, header) {
+          if (header !== "valid-signature") throw new Error("signature verification failed");
+          return JSON.parse(payload) as StripeLikeEvent;
+        }
+      },
+      accounts: {
+        async create() {
+          captured.accountsCreated += 1;
+          return { id: "acct_connected_1" };
+        },
+        async retrieve(id) {
+          return { id, ...status };
+        }
+      },
+      accountLinks: {
+        async create() {
+          return { url: "https://connect.stripe.com/setup/s/acct_connected_1" };
+        }
+      }
+    };
+    const adapter = new StripePaymentAdapter({
+      client,
+      successUrl: "https://example.com/done",
+      cancelUrl: "https://example.com/",
+      webhookSecret: "whsec_test"
+    });
+    const store = new MemoryMarketplaceStore();
+    const keystore = await Keystore.ephemeral();
+    const service = await MarketplaceService.create({
+      store,
+      keystore,
+      envelope: new QevVaultV2EnvelopeAdapter({ preset: "quick" }),
+      payments: adapter,
+      issuerName: "connect-test-issuer",
+      verificationUrlBase: "https://mydigital.imagineqira.com/verify",
+      connect: { enabled: true, applicationFeeBps: 500 }
+    });
+    return { service, store, captured };
+  }
+
+  it("onboarding creates a connected account; refresh records payout status", async () => {
+    const { service, store, captured } = await makeConnectService();
+    await seedListing(service);
+    const onboard = await service.startCreatorPayoutOnboarding({
+      returnUrl: "https://mydigital.imagineqira.com/creator?payouts=return",
+      refreshUrl: "https://mydigital.imagineqira.com/creator?payouts=refresh"
+    });
+    expect(onboard.url).toContain("connect.stripe.com");
+    expect(onboard.accountId).toBe("acct_connected_1");
+    expect(captured.accountsCreated).toBe(1);
+    expect((await store.listCreators())[0]?.stripeAccountId).toBe("acct_connected_1");
+
+    // A second onboarding reuses the account rather than creating another.
+    await service.startCreatorPayoutOnboarding({
+      returnUrl: "https://x/return",
+      refreshUrl: "https://x/refresh"
+    });
+    expect(captured.accountsCreated).toBe(1);
+
+    const status = await service.refreshCreatorPayoutStatus();
+    expect(status.payoutsEnabled).toBe(true);
+    expect((await store.listCreators())[0]?.payoutsEnabled).toBe(true);
+  });
+
+  it("routes checkout to the creator's connected account with the platform fee", async () => {
+    const { service, captured } = await makeConnectService();
+    const { listing } = await seedListing(service);
+    await service.startCreatorPayoutOnboarding({
+      returnUrl: "https://x/r",
+      refreshUrl: "https://x/f"
+    });
+    await service.refreshCreatorPayoutStatus();
+
+    const begun = await service.beginCheckout({
+      listingId: listing.id,
+      email: "buyer@example.com"
+    });
+    expect(begun.session.connectedAccountId).toBe("acct_connected_1");
+    expect(captured.createOptions?.stripeAccount).toBe("acct_connected_1");
+    const fee = (captured.lastParams as { payment_intent_data?: { application_fee_amount?: number } })
+      .payment_intent_data?.application_fee_amount;
+    expect(fee).toBe(95); // 5% of 1900
+  });
+
+  it("refuses checkout until the creator has finished payout onboarding", async () => {
+    const { service } = await makeConnectService();
+    const { listing } = await seedListing(service);
+    await expect(
+      service.beginCheckout({ listingId: listing.id, email: "buyer@example.com" })
+    ).rejects.toThrow(/direct payouts/);
+  });
+
+  it("does not record payouts as enabled when Stripe says details are incomplete", async () => {
+    const { service, store } = await makeConnectService({
+      charges_enabled: false,
+      payouts_enabled: false,
+      details_submitted: false
+    });
+    await seedListing(service);
+    await service.startCreatorPayoutOnboarding({
+      returnUrl: "https://x/r",
+      refreshUrl: "https://x/f"
+    });
+    const status = await service.refreshCreatorPayoutStatus();
+    expect(status.payoutsEnabled).toBe(false);
+    expect((await store.listCreators())[0]?.payoutsEnabled).toBe(false);
+  });
+});
+
 describe("issuer persistence across restarts", () => {
   it("a second service instance on the same database keeps the issuer and old licenses verify", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "mydigital-server-"));
@@ -668,6 +817,52 @@ describe("HTTP app", () => {
       headers: { Authorization: "Bearer secret-token" }
     });
     expect(allowed.status).toBe(200);
+  });
+
+  it("gates creator/listing mutations behind the admin token but leaves buyer flows open", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    const app = createApp(service, { adminToken: "secret-token" });
+
+    const noTokenPatch = await app.request("/api/creator", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bio: "blocked" })
+    });
+    expect(noTokenPatch.status).toBe(401);
+
+    const noTokenDelete = await app.request(`/api/listings/${listing.id}`, { method: "DELETE" });
+    expect(noTokenDelete.status).toBe(401);
+
+    const noTokenOnboard = await app.request("/api/creator/payouts/onboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ returnUrl: "https://x/r", refreshUrl: "https://x/f" })
+    });
+    expect(noTokenOnboard.status).toBe(401);
+
+    // Buyers can still check out without the management token.
+    const openCheckout = await app.request("/api/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listingId: listing.id, email: "open@example.com" })
+    });
+    expect(openCheckout.status).toBe(201);
+
+    const okPatch = await app.request("/api/creator", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer secret-token" },
+      body: JSON.stringify({ bio: "gated bio" })
+    });
+    expect(okPatch.status).toBe(200);
+    expect(((await okPatch.json()) as { bio: string }).bio).toBe("gated bio");
+  });
+
+  it("reports connect mode in health (off by default)", async () => {
+    const { service } = await makeService();
+    const app = createApp(service);
+    const health = await app.request("/api/health");
+    expect(((await health.json()) as { connect: boolean }).connect).toBe(false);
   });
 
   it("serves the static web build with SPA fallback when configured", async () => {

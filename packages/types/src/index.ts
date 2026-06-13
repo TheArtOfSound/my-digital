@@ -40,6 +40,14 @@ export interface Creator {
   avatarUrl?: string;
   /** Optional creator website / link. */
   websiteUrl?: string;
+  /**
+   * The creator's own Stripe Connect account id (acct_…). When set and payouts
+   * are enabled, buyers pay this account directly — funds never touch the
+   * platform's Stripe balance.
+   */
+  stripeAccountId?: string;
+  /** True once Stripe reports the connected account can accept charges/payouts. */
+  payoutsEnabled?: boolean;
 }
 
 export interface Buyer {
@@ -297,11 +305,24 @@ export interface CheckoutSession {
   completedAt?: string;
   /** Hosted checkout URL for redirect-based providers; absent for the mock. */
   checkoutUrl?: string;
+  /**
+   * Stripe Connect account the charge was created on (direct charge). Persisted
+   * so confirmation after a restart retrieves the session on the right account.
+   */
+  connectedAccountId?: string;
 }
 
 export interface CreateCheckoutInput {
   listing: Listing;
   buyer: Buyer;
+  /**
+   * Stripe Connect account to charge directly (the creator's account). When
+   * set, the charge is created on this account and the buyer pays the creator
+   * directly; the platform may take an application fee.
+   */
+  connectedAccountId?: string;
+  /** Platform application fee in the smallest currency unit (cents). */
+  applicationFeeAmount?: number;
 }
 
 export interface ConfirmPaymentInput {

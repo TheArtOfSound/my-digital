@@ -123,7 +123,9 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
         publicSigningKey: creator.publicSigningKey ?? null,
         bio: creator.bio ?? null,
         avatarUrl: creator.avatarUrl ?? null,
-        websiteUrl: creator.websiteUrl ?? null
+        websiteUrl: creator.websiteUrl ?? null,
+        stripeAccountId: creator.stripeAccountId ?? null,
+        payoutsEnabled: creator.payoutsEnabled ?? null
       })
       .where(eq(schema.creators.id, creator.id))
       .run();
@@ -427,6 +429,7 @@ export class SqliteMarketplaceStore implements MarketplaceStore {
       .values({
         ...session,
         checkoutUrl: session.checkoutUrl ?? null,
+        connectedAccountId: session.connectedAccountId ?? null,
         completedAt: session.completedAt ?? null
       })
       .run();

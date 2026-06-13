@@ -2,9 +2,11 @@ import type { Buyer, BuyerId, CreatorId, AssetId, AssetVersionId, Listing, Listi
 import { describe, expect, it } from "vitest";
 import {
   StripePaymentAdapter,
+  type StripeLikeAccount,
   type StripeLikeCheckoutSession,
   type StripeLikeClient,
-  type StripeLikeEvent
+  type StripeLikeEvent,
+  type StripeRequestOptions
 } from "./index";
 
 const listing: Listing = {
@@ -41,18 +43,25 @@ interface FakeState {
   created: Record<string, unknown>[];
   session: StripeLikeCheckoutSession;
   webhookSecretSeen?: string;
+  lastCreateOptions?: StripeRequestOptions | undefined;
+  lastRetrieveOptions?: StripeRequestOptions | undefined;
+  accountsCreated?: Record<string, unknown>[];
+  onboardingParams?: Record<string, unknown>;
+  accountStatus?: StripeLikeAccount;
 }
 
 function fakeClient(state: FakeState): StripeLikeClient {
   return {
     checkout: {
       sessions: {
-        async create(params) {
+        async create(params, options) {
           state.created.push(params);
+          state.lastCreateOptions = options;
           return state.session;
         },
-        async retrieve(id) {
+        async retrieve(id, options) {
           if (id !== state.session.id) throw new Error("no such session");
+          state.lastRetrieveOptions = options;
           return state.session;
         }
       }
@@ -62,6 +71,21 @@ function fakeClient(state: FakeState): StripeLikeClient {
         state.webhookSecretSeen = secret;
         if (header !== "valid-signature") throw new Error("Webhook signature verification failed");
         return JSON.parse(payload) as StripeLikeEvent;
+      }
+    },
+    accounts: {
+      async create(params) {
+        (state.accountsCreated ??= []).push(params);
+        return { id: "acct_test_123" };
+      },
+      async retrieve(id) {
+        return { ...(state.accountStatus ?? {}), id };
+      }
+    },
+    accountLinks: {
+      async create(params) {
+        state.onboardingParams = params;
+        return { url: "https://connect.stripe.com/setup/s/acct_test_123" };
       }
     }
   };
@@ -222,5 +246,105 @@ describe("StripePaymentAdapter.confirmFromWebhook", () => {
     };
     const confirmation = await adapter.confirmFromWebhook(JSON.stringify(event), "valid-signature");
     expect(confirmation?.outcome).toBe("failed");
+  });
+});
+
+describe("StripePaymentAdapter Connect (direct payouts)", () => {
+  it("routes the charge to the creator's connected account with an application fee", async () => {
+    const state: FakeState = { created: [], session: baseStripeSession() };
+    const adapter = makeAdapter(state);
+    const session = await adapter.createCheckout({
+      listing,
+      buyer,
+      connectedAccountId: "acct_creator_1",
+      applicationFeeAmount: 95
+    });
+    expect(session.connectedAccountId).toBe("acct_creator_1");
+    expect(state.lastCreateOptions?.stripeAccount).toBe("acct_creator_1");
+    const params = state.created[0] as {
+      payment_intent_data?: { application_fee_amount?: number };
+    };
+    expect(params.payment_intent_data?.application_fee_amount).toBe(95);
+  });
+
+  it("omits the application fee when zero and confirms on the connected account", async () => {
+    const state: FakeState = { created: [], session: baseStripeSession() };
+    const adapter = makeAdapter(state);
+    const session = await adapter.createCheckout({
+      listing,
+      buyer,
+      connectedAccountId: "acct_creator_1",
+      applicationFeeAmount: 0
+    });
+    const params = state.created[0] as { payment_intent_data?: unknown };
+    expect(params.payment_intent_data).toBeUndefined();
+
+    state.session = { ...state.session, status: "complete", payment_status: "paid" };
+    const confirmation = await adapter.confirmPayment({ sessionId: session.id });
+    expect(confirmation.outcome).toBe("paid");
+    expect(state.lastRetrieveOptions?.stripeAccount).toBe("acct_creator_1");
+  });
+
+  it("creates an Express account and a hosted onboarding link", async () => {
+    const state: FakeState = { created: [], session: baseStripeSession() };
+    const adapter = makeAdapter(state);
+    const accountId = await adapter.createConnectedAccount({ email: "creator@example.com" });
+    expect(accountId).toBe("acct_test_123");
+    expect((state.accountsCreated?.[0] as { type?: string }).type).toBe("express");
+
+    const url = await adapter.createOnboardingLink({
+      accountId,
+      returnUrl: "https://mydigital.imagineqira.com/creator?payouts=return",
+      refreshUrl: "https://mydigital.imagineqira.com/creator?payouts=refresh"
+    });
+    expect(url).toContain("connect.stripe.com");
+    expect(state.onboardingParams?.account).toBe("acct_test_123");
+    expect(state.onboardingParams?.type).toBe("account_onboarding");
+  });
+
+  it("reports account status from Stripe flags", async () => {
+    const state: FakeState = {
+      created: [],
+      session: baseStripeSession(),
+      accountStatus: {
+        id: "acct_test_123",
+        charges_enabled: true,
+        payouts_enabled: true,
+        details_submitted: true
+      }
+    };
+    const adapter = makeAdapter(state);
+    const status = await adapter.getAccountStatus("acct_test_123");
+    expect(status).toEqual({
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      detailsSubmitted: true
+    });
+  });
+
+  it("rejects Connect calls when the client lacks Connect support", async () => {
+    const noConnect = new StripePaymentAdapter({
+      client: {
+        checkout: {
+          sessions: {
+            async create() {
+              return baseStripeSession();
+            },
+            async retrieve() {
+              return baseStripeSession();
+            }
+          }
+        },
+        webhooks: {
+          async constructEventAsync() {
+            return { id: "evt", type: "x", data: { object: baseStripeSession() } };
+          }
+        }
+      },
+      successUrl: "https://x/done",
+      cancelUrl: "https://x/cancel"
+    });
+    await expect(noConnect.createConnectedAccount({})).rejects.toThrow(/Connect/);
+    await expect(noConnect.getAccountStatus("acct_x")).rejects.toThrow(/Connect/);
   });
 });

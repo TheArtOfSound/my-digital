@@ -36,6 +36,7 @@ import {
 } from "react";
 import {
   api,
+  setApiAdminToken,
   type BuyerLibrary,
   type ReceiptBundle,
   type ServerCheckoutOutcome,
@@ -169,6 +170,16 @@ interface MarketplaceActions {
   getReceiptBundle(receiptId: ProofReceiptId): Promise<ReceiptBundle>;
   traceArtifact(bytes: Uint8Array): Promise<TraceResult>;
   fetchLibraryByEmail(email: string): Promise<BuyerLibrary>;
+  /** Sets (or clears) the management token used for gated creator actions. */
+  setAdminToken(token: string | undefined): void;
+  /** Starts Stripe Connect onboarding; returns a hosted URL to open. */
+  startPayoutOnboarding(): Promise<{ url: string; accountId: string }>;
+  /** Re-checks the connected account and refreshes state. */
+  refreshPayoutStatus(): Promise<{
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    detailsSubmitted: boolean;
+  }>;
   resetDemo(): Promise<void>;
 }
 
@@ -177,6 +188,10 @@ interface MarketplaceContextValue {
   unsupportedReason: string | null;
   /** Active payment provider reported by the server ("mock" until known). */
   paymentsProvider: string;
+  /** True when direct-payout (Stripe Connect) mode is active on the server. */
+  connectEnabled: boolean;
+  /** True when a management token is set (creator console actions enabled). */
+  hasAdminToken: boolean;
   state: ServerState;
   actions: MarketplaceActions;
 }
@@ -187,6 +202,8 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<MarketplaceContextValue["status"]>("loading");
   const [unsupportedReason, setUnsupportedReason] = useState<string | null>(null);
   const [paymentsProvider, setPaymentsProvider] = useState("mock");
+  const [connectEnabled, setConnectEnabled] = useState(false);
+  const [hasAdminToken, setHasAdminToken] = useState(false);
   const [state, setState] = useState<ServerState>(emptyServerState);
   const stateRef = useRef(state);
 
@@ -194,6 +211,19 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
     const next = await api.getState();
     stateRef.current = next;
     setState(next);
+  }, []);
+
+  // Load any persisted management token before issuing gated calls.
+  useEffect(() => {
+    try {
+      const token = localStorage.getItem("mydigital-admin-token");
+      if (token) {
+        setApiAdminToken(token);
+        setHasAdminToken(true);
+      }
+    } catch {
+      // localStorage may be unavailable; management actions can be re-entered.
+    }
   }, []);
 
   useEffect(() => {
@@ -210,6 +240,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         const [, health] = await Promise.all([refresh(), api.getHealth()]);
         if (!cancelled) {
           setPaymentsProvider(health.payments);
+          setConnectEnabled(health.connect === true);
           setStatus("ready");
         }
       } catch {
@@ -491,6 +522,33 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         return api.getBuyerLibrary(await hashEmail(email));
       },
 
+      setAdminToken(token) {
+        const trimmed = token?.trim();
+        const value = trimmed && trimmed.length > 0 ? trimmed : undefined;
+        setApiAdminToken(value);
+        try {
+          if (value) localStorage.setItem("mydigital-admin-token", value);
+          else localStorage.removeItem("mydigital-admin-token");
+        } catch {
+          // Non-fatal: the token stays set for this session via setApiAdminToken.
+        }
+        setHasAdminToken(Boolean(value));
+      },
+
+      async startPayoutOnboarding() {
+        const origin = window.location.origin;
+        return api.startPayoutOnboarding({
+          returnUrl: `${origin}/creator?payouts=return`,
+          refreshUrl: `${origin}/creator?payouts=refresh`
+        });
+      },
+
+      async refreshPayoutStatus() {
+        const status = await api.refreshPayoutStatus();
+        await refresh();
+        return status;
+      },
+
       async resetDemo() {
         await api.reset();
         await refresh();
@@ -499,8 +557,16 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo<MarketplaceContextValue>(
-    () => ({ status, unsupportedReason, paymentsProvider, state, actions }),
-    [status, unsupportedReason, paymentsProvider, state, actions]
+    () => ({
+      status,
+      unsupportedReason,
+      paymentsProvider,
+      connectEnabled,
+      hasAdminToken,
+      state,
+      actions
+    }),
+    [status, unsupportedReason, paymentsProvider, connectEnabled, hasAdminToken, state, actions]
   );
 
   return <MarketplaceContext.Provider value={value}>{children}</MarketplaceContext.Provider>;

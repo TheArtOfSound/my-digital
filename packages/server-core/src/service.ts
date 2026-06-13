@@ -64,6 +64,29 @@ export interface ServiceOptions {
   payments: PaymentAdapter;
   issuerName: string;
   verificationUrlBase: string;
+  /**
+   * Direct-payout (Stripe Connect) configuration. When enabled, checkout is
+   * routed to the listing creator's connected account so funds go straight to
+   * the creator; the platform never holds the money.
+   */
+  connect?: {
+    enabled: boolean;
+    /** Platform application fee in basis points (0 = creators keep 100%). */
+    applicationFeeBps?: number;
+  };
+}
+
+/** Direct-payout operations a payment adapter may support (Stripe Connect). */
+interface ConnectOps {
+  createConnectedAccount(input: { email?: string }): Promise<string>;
+  createOnboardingLink(input: {
+    accountId: string;
+    refreshUrl: string;
+    returnUrl: string;
+  }): Promise<string>;
+  getAccountStatus(
+    accountId: string
+  ): Promise<{ chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean }>;
 }
 
 export interface ServerState {
@@ -309,6 +332,76 @@ export class MarketplaceService {
     return { deleted: true };
   }
 
+  /** True when direct-payout (Stripe Connect) mode is active. */
+  connectEnabled(): boolean {
+    return this.opts.connect?.enabled === true;
+  }
+
+  private connectAdapter(): ConnectOps {
+    const adapter = this.opts.payments as Partial<ConnectOps>;
+    if (
+      typeof adapter.createConnectedAccount !== "function" ||
+      typeof adapter.createOnboardingLink !== "function" ||
+      typeof adapter.getAccountStatus !== "function"
+    ) {
+      throw new Error(
+        "The active payment provider does not support direct payouts (Stripe Connect)."
+      );
+    }
+    return adapter as ConnectOps;
+  }
+
+  /**
+   * Starts (or resumes) the creator's Stripe Connect onboarding and returns a
+   * hosted onboarding URL. Creates the connected account on first use; the
+   * creator completes bank/identity details on Stripe's own pages.
+   */
+  async startCreatorPayoutOnboarding(input: {
+    returnUrl: string;
+    refreshUrl: string;
+  }): Promise<{ url: string; accountId: string }> {
+    const { store } = this.opts;
+    const creator = (await store.listCreators())[0];
+    if (!creator) throw new Error("Create the creator profile first.");
+    const connect = this.connectAdapter();
+    let accountId = creator.stripeAccountId;
+    if (!accountId) {
+      accountId = await connect.createConnectedAccount({});
+      await store.updateCreator({ ...creator, stripeAccountId: accountId });
+    }
+    const url = await connect.createOnboardingLink({
+      accountId,
+      returnUrl: input.returnUrl,
+      refreshUrl: input.refreshUrl
+    });
+    return { url, accountId };
+  }
+
+  /** Re-checks the connected account with Stripe and stores the payout status. */
+  async refreshCreatorPayoutStatus(): Promise<{
+    stripeAccountId?: string;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    detailsSubmitted: boolean;
+  }> {
+    const { store } = this.opts;
+    const creator = (await store.listCreators())[0];
+    if (!creator) throw new Error("Create the creator profile first.");
+    if (!creator.stripeAccountId) {
+      return { chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false };
+    }
+    const connect = this.connectAdapter();
+    const status = await connect.getAccountStatus(creator.stripeAccountId);
+    const payoutsEnabled = status.payoutsEnabled && status.chargesEnabled;
+    await store.updateCreator({ ...creator, payoutsEnabled });
+    return {
+      stripeAccountId: creator.stripeAccountId,
+      chargesEnabled: status.chargesEnabled,
+      payoutsEnabled,
+      detailsSubmitted: status.detailsSubmitted
+    };
+  }
+
   async createLockedListing(input: CreateListingInput): Promise<{
     asset: Asset;
     assetVersion: AssetVersion;
@@ -410,7 +503,24 @@ export class MarketplaceService {
       await store.insertBuyer(buyer);
     }
 
-    const session = await payments.createCheckout({ listing, buyer });
+    // Direct-payout mode: route the charge to the creator's connected account so
+    // funds settle to the creator, not the platform. Block sale until ready.
+    let connectExtras: { connectedAccountId: string; applicationFeeAmount: number } | undefined;
+    if (this.connectEnabled()) {
+      const creator = await store.getCreator(listing.creatorId);
+      if (!creator?.stripeAccountId || creator.payoutsEnabled !== true) {
+        throw new Error(
+          "This creator has not finished setting up direct payouts, so this listing cannot be purchased yet."
+        );
+      }
+      const feeBps = this.opts.connect?.applicationFeeBps ?? 0;
+      connectExtras = {
+        connectedAccountId: creator.stripeAccountId,
+        applicationFeeAmount: Math.round((listing.priceAmount * feeBps) / 10000)
+      };
+    }
+
+    const session = await payments.createCheckout({ listing, buyer, ...(connectExtras ?? {}) });
     const purchase = createPendingPurchase({ listing, buyer, session });
     await store.insertPurchase(purchase);
     await store.insertCheckoutSession({ ...session, purchaseId: purchase.id });
