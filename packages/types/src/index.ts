@@ -34,6 +34,12 @@ export interface Creator {
   createdAt: string;
   verificationStatus: "unverified" | "reviewed" | "verified";
   publicSigningKey?: string;
+  /** Short creator bio shown on the public profile. */
+  bio?: string;
+  /** Avatar as an https URL or a small data: URL (image/*). */
+  avatarUrl?: string;
+  /** Optional creator website / link. */
+  websiteUrl?: string;
 }
 
 export interface Buyer {

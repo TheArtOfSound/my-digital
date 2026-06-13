@@ -109,12 +109,39 @@ function postJson(body: unknown): RequestInit {
   };
 }
 
+function sendJson(method: string, body?: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+  };
+}
+
 export const api = {
   getHealth: () =>
     requestJson<{ ok: boolean; envelope: string; payments: string }>("/api/health"),
   getState: () => requestJson<ServerState>("/api/state"),
   ensureCreator: (input: { displayName: string; handle: string; email: string }) =>
     requestJson<Creator>("/api/creator", postJson(input)),
+  updateCreator: (input: {
+    displayName?: string;
+    handle?: string;
+    bio?: string;
+    avatarUrl?: string;
+    websiteUrl?: string;
+  }) => requestJson<Creator>("/api/creator", sendJson("PATCH", input)),
+  updateListing: (
+    listingId: string,
+    input: {
+      title?: string;
+      description?: string;
+      priceAmount?: number;
+      priceCurrency?: string;
+      status?: "active" | "paused" | "archived";
+    }
+  ) => requestJson<Listing>(`/api/listings/${listingId}`, sendJson("PATCH", input)),
+  deleteListing: (listingId: string) =>
+    requestJson<{ deleted: true }>(`/api/listings/${listingId}`, sendJson("DELETE")),
   createListing: (input: {
     title: string;
     description: string;

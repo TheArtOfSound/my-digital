@@ -99,6 +99,20 @@ export class D1MarketplaceStore implements MarketplaceStore {
   async listCreators(): Promise<Creator[]> {
     return (await this.db.select().from(schema.creators).all()).map(rowToCreator);
   }
+  async updateCreator(creator: Creator): Promise<void> {
+    await this.db
+      .update(schema.creators)
+      .set({
+        displayName: creator.displayName,
+        handle: creator.handle,
+        verificationStatus: creator.verificationStatus,
+        publicSigningKey: creator.publicSigningKey ?? null,
+        bio: creator.bio ?? null,
+        avatarUrl: creator.avatarUrl ?? null,
+        websiteUrl: creator.websiteUrl ?? null
+      })
+      .where(eq(schema.creators.id, creator.id));
+  }
 
   async insertBuyer(buyer: Buyer): Promise<void> {
     await this.db
@@ -305,6 +319,46 @@ export class D1MarketplaceStore implements MarketplaceStore {
   }
   async listListings(): Promise<Listing[]> {
     return (await this.db.select().from(schema.listings).all()).map(rowToListing);
+  }
+  async updateListing(listing: Listing): Promise<void> {
+    await this.db
+      .update(schema.listings)
+      .set({
+        title: listing.title,
+        description: listing.description,
+        priceAmount: listing.priceAmount,
+        priceCurrency: listing.priceCurrency,
+        licenseTerms: JSON.stringify(listing.licenseTerms),
+        status: listing.status,
+        updatedAt: listing.updatedAt
+      })
+      .where(eq(schema.listings.id, listing.id));
+  }
+  async deleteListingCascade(id: ListingId): Promise<void> {
+    const listing = await this.getListing(id);
+    if (!listing) return;
+    await this.db.delete(schema.listings).where(eq(schema.listings.id, id));
+    const assetStillUsed = (await this.listListings()).some(
+      (entry) => entry.assetId === listing.assetId
+    );
+    if (assetStillUsed) return;
+    const versions = (await this.listAssetVersions()).filter(
+      (entry) => entry.assetId === listing.assetId
+    );
+    for (const version of versions) {
+      const locked = await this.getLockedAssetByVersion(version.id);
+      if (locked) {
+        await this.db
+          .delete(schema.lockedPayloads)
+          .where(eq(schema.lockedPayloads.lockedAssetId, locked.id));
+        await this.db
+          .delete(schema.custodySecrets)
+          .where(eq(schema.custodySecrets.lockedAssetId, locked.id));
+        await this.db.delete(schema.lockedAssets).where(eq(schema.lockedAssets.id, locked.id));
+      }
+      await this.db.delete(schema.assetVersions).where(eq(schema.assetVersions.id, version.id));
+    }
+    await this.db.delete(schema.assets).where(eq(schema.assets.id, listing.assetId));
   }
 
   async insertPurchase(purchase: Purchase): Promise<void> {

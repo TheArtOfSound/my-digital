@@ -57,7 +57,10 @@ export function rowToCreator(row: CreatorRow): Creator {
     emailHash: row.emailHash,
     createdAt: row.createdAt,
     verificationStatus: row.verificationStatus as Creator["verificationStatus"],
-    ...opt("publicSigningKey", row.publicSigningKey)
+    ...opt("publicSigningKey", row.publicSigningKey),
+    ...opt("bio", row.bio),
+    ...opt("avatarUrl", row.avatarUrl),
+    ...opt("websiteUrl", row.websiteUrl)
   };
 }
 

@@ -13,7 +13,10 @@ export const creators = sqliteTable("creators", {
   emailHash: text("email_hash").notNull(),
   createdAt: text("created_at").notNull(),
   verificationStatus: text("verification_status").notNull(),
-  publicSigningKey: text("public_signing_key")
+  publicSigningKey: text("public_signing_key"),
+  bio: text("bio"),
+  avatarUrl: text("avatar_url"),
+  websiteUrl: text("website_url")
 });
 
 export const buyers = sqliteTable("buyers", {

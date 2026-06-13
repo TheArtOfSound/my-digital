@@ -921,6 +921,135 @@ input[type="file"] {
   gap: 8px;
 }
 
+/* Creator profile ----------------------------------------------------------- */
+
+.avatar {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--paper-shade);
+  display: inline-block;
+}
+
+.avatar-sm {
+  width: 44px;
+  height: 44px;
+}
+
+.avatar-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-faint);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.avatar-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.avatar-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.creator-badge {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.creator-badge-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.creator-badge-name {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.creator-badge-handle {
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+
+.creator-badge-bio {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  max-width: 560px;
+}
+
+.creator-badge-link {
+  font-size: 0.84rem;
+}
+
+/* Listing manager ----------------------------------------------------------- */
+
+.listing-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.manage-card {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 16px 18px;
+}
+
+.manage-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.manage-title {
+  margin: 0 0 4px;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+}
+
+.manage-meta {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.manage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.manage-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+.manage-status select {
+  font-size: 0.82rem;
+}
+
 /* Responsive ----------------------------------------------------------------- */
 
 @media (max-width: 780px) {

@@ -224,6 +224,26 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
       expect(await store.listCreators()).toEqual([creator]);
     });
 
+    it("updates a creator's profile fields and clears optional ones", async () => {
+      await store.updateCreator({
+        ...creator,
+        displayName: "Renamed",
+        bio: "Maker of proofs",
+        avatarUrl: "https://cdn.example.com/a.png",
+        websiteUrl: "https://example.com"
+      });
+      expect(await store.getCreator(creator.id)).toEqual({
+        ...creator,
+        displayName: "Renamed",
+        bio: "Maker of proofs",
+        avatarUrl: "https://cdn.example.com/a.png",
+        websiteUrl: "https://example.com"
+      });
+      // Restore the base creator (optional fields cleared) for later tests.
+      await store.updateCreator(creator);
+      expect(await store.getCreator(creator.id)).toEqual(creator);
+    });
+
     it("round-trips buyers and finds them by email hash", async () => {
       await store.insertBuyer(buyer);
       expect(await store.getBuyer(buyer.id)).toEqual(buyer);
@@ -294,6 +314,23 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
     it("round-trips listings including license terms JSON", async () => {
       await store.insertListing(listing);
       expect(await store.getListing(listing.id)).toEqual(listing);
+    });
+
+    it("updates a listing's fields and status", async () => {
+      await store.updateListing({
+        ...listing,
+        title: "Renamed listing",
+        priceAmount: 2500,
+        status: "paused",
+        updatedAt: "2026-06-13T00:00:00.000Z"
+      });
+      const updated = await store.getListing(listing.id);
+      expect(updated?.title).toBe("Renamed listing");
+      expect(updated?.priceAmount).toBe(2500);
+      expect(updated?.status).toBe("paused");
+      // Restore so the listing row stays consistent for purchase/FK tests.
+      await store.updateListing(listing);
+      expect((await store.getListing(listing.id))?.status).toBe("active");
     });
 
     it("round-trips purchases", async () => {
@@ -415,3 +452,38 @@ function conformance(name: string, makeStore: () => Promise<MarketplaceStore>): 
 
 conformance("memory", async () => new MemoryMarketplaceStore());
 conformance("sqlite (:memory:)", async () => openSqliteStore({ path: ":memory:" }));
+
+function cascadeDelete(name: string, makeStore: () => Promise<MarketplaceStore>): void {
+  describe(`${name} delete listing cascade`, () => {
+    it("removes an unsold listing and its whole asset chain, keeping the creator", async () => {
+      const store = await makeStore();
+      await store.insertCreator(creator);
+      await store.insertAsset(asset);
+      await store.insertAssetVersion(assetVersion, manifest);
+      await store.insertLockedAsset(lockedAsset);
+      await store.putLockedPayload(lockedAsset.id, payloadBytes);
+      await store.putCustodySecret(lockedAsset.id, {
+        nonceB64: "n",
+        sealedB64: "s",
+        createdAt: NOW
+      });
+      await store.insertListing(listing);
+
+      await store.deleteListingCascade(listing.id);
+
+      expect(await store.getListing(listing.id)).toBeNull();
+      expect(await store.getAsset(asset.id)).toBeNull();
+      expect(await store.getAssetVersion(assetVersion.id)).toBeNull();
+      expect(await store.getLockedAsset(lockedAsset.id)).toBeNull();
+      expect(await store.getLockedPayload(lockedAsset.id)).toBeNull();
+      expect(await store.getCustodySecret(lockedAsset.id)).toBeNull();
+      // The creator profile is not touched by a listing delete.
+      expect(await store.getCreator(creator.id)).not.toBeNull();
+
+      await store.close();
+    });
+  });
+}
+
+cascadeDelete("memory", async () => new MemoryMarketplaceStore());
+cascadeDelete("sqlite (:memory:)", async () => openSqliteStore({ path: ":memory:" }));

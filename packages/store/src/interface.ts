@@ -56,6 +56,8 @@ export interface MarketplaceStore {
   insertCreator(creator: Creator): Promise<void>;
   getCreator(id: CreatorId): Promise<Creator | null>;
   listCreators(): Promise<Creator[]>;
+  /** Replaces a creator's mutable profile fields. */
+  updateCreator(creator: Creator): Promise<void>;
 
   insertBuyer(buyer: Buyer): Promise<void>;
   getBuyer(id: BuyerId): Promise<Buyer | null>;
@@ -103,6 +105,14 @@ export interface MarketplaceStore {
   insertListing(listing: Listing): Promise<void>;
   getListing(id: ListingId): Promise<Listing | null>;
   listListings(): Promise<Listing[]>;
+  /** Replaces a listing's mutable fields (title, price, status, …). */
+  updateListing(listing: Listing): Promise<void>;
+  /**
+   * Deletes a listing and the asset chain behind it (asset, its versions,
+   * their locked packages, payloads, and custody secrets). The caller is
+   * responsible for refusing deletion when sales/licenses reference the asset.
+   */
+  deleteListingCascade(id: ListingId): Promise<void>;
 
   insertPurchase(purchase: Purchase): Promise<void>;
   getPurchase(id: PurchaseId): Promise<Purchase | null>;

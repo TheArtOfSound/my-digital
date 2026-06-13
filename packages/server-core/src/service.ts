@@ -51,6 +51,10 @@ import { Keystore, ensureServerIssuer, type ServerIssuer } from "./keystore";
 // Cloudflare D1's 2 MB row limit and matches the upstream CLI's 1 MiB cap.
 const MAX_PAYLOAD_BYTES = 1_000_000;
 
+// Avatars are stored inline (data URL or https URL). Keep them small: a 200 KB
+// image is ~270k base64 chars. This bounds the row well under D1's limits.
+const MAX_AVATAR_CHARS = 300_000;
+
 export const RECEIPT_BUNDLE_KIND = "MYDIGITAL-RECEIPT-BUNDLE-V1";
 
 export interface ServiceOptions {
@@ -167,6 +171,142 @@ export class MarketplaceService {
     const creator = await createCreator(input);
     await this.opts.store.insertCreator(creator);
     return creator;
+  }
+
+  /** Edits the creator's mutable profile (name, handle, bio, avatar, website). */
+  async updateCreatorProfile(input: {
+    displayName?: string;
+    handle?: string;
+    bio?: string;
+    avatarUrl?: string;
+    websiteUrl?: string;
+  }): Promise<Creator> {
+    const existing = (await this.opts.store.listCreators())[0];
+    if (!existing) throw new Error("Create the creator profile first.");
+
+    const updated: Creator = { ...existing };
+    if (input.displayName !== undefined) {
+      const name = input.displayName.trim();
+      if (name.length < 1 || name.length > 80) {
+        throw new Error("Display name must be 1–80 characters.");
+      }
+      updated.displayName = name;
+    }
+    if (input.handle !== undefined) {
+      const handle = input.handle.trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9-]{1,31}$/.test(handle)) {
+        throw new Error(
+          "Handle must be 2–32 characters: lowercase letters, numbers, and hyphens, starting alphanumeric."
+        );
+      }
+      updated.handle = handle;
+    }
+    if (input.bio !== undefined) {
+      const bio = input.bio.trim();
+      if (bio.length > 600) throw new Error("Bio must be 600 characters or fewer.");
+      if (bio.length === 0) delete updated.bio;
+      else updated.bio = bio;
+    }
+    if (input.avatarUrl !== undefined) {
+      const avatar = input.avatarUrl.trim();
+      if (avatar.length === 0) {
+        delete updated.avatarUrl;
+      } else {
+        if (avatar.length > MAX_AVATAR_CHARS) {
+          throw new Error("Avatar image is too large; use one under ~200 KB.");
+        }
+        const ok =
+          avatar.startsWith("https://") ||
+          /^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(avatar);
+        if (!ok) throw new Error("Avatar must be an https URL or an image data URL.");
+        updated.avatarUrl = avatar;
+      }
+    }
+    if (input.websiteUrl !== undefined) {
+      const site = input.websiteUrl.trim();
+      if (site.length === 0) {
+        delete updated.websiteUrl;
+      } else if (site.length > 300 || !/^https?:\/\/\S+$/.test(site)) {
+        throw new Error("Website must be an http(s) URL under 300 characters.");
+      } else {
+        updated.websiteUrl = site;
+      }
+    }
+    await this.opts.store.updateCreator(updated);
+    return updated;
+  }
+
+  /** Edits a listing's mutable fields, including pause/activate/archive. */
+  async updateListing(input: {
+    listingId: ListingId;
+    title?: string;
+    description?: string;
+    priceAmount?: number;
+    priceCurrency?: string;
+    status?: Listing["status"];
+  }): Promise<Listing> {
+    const listing = await this.opts.store.getListing(input.listingId);
+    if (!listing) throw new Error("Listing not found.");
+    const updated: Listing = { ...listing };
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (title.length < 1 || title.length > 120) {
+        throw new Error("Title must be 1–120 characters.");
+      }
+      updated.title = title;
+    }
+    if (input.description !== undefined) {
+      const description = input.description.trim();
+      if (description.length > 1000) {
+        throw new Error("Description must be 1000 characters or fewer.");
+      }
+      updated.description = description;
+    }
+    if (input.priceAmount !== undefined) {
+      if (
+        !Number.isInteger(input.priceAmount) ||
+        input.priceAmount < 0 ||
+        input.priceAmount > 100_000_00
+      ) {
+        throw new Error("Price must be a whole number of cents between 0 and 10,000,000.");
+      }
+      updated.priceAmount = input.priceAmount;
+    }
+    if (input.priceCurrency !== undefined) {
+      const currency = input.priceCurrency.trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Currency must be a 3-letter code.");
+      updated.priceCurrency = currency;
+    }
+    if (input.status !== undefined) {
+      if (!["active", "paused", "archived"].includes(input.status)) {
+        throw new Error("Status must be active, paused, or archived.");
+      }
+      updated.status = input.status;
+    }
+    updated.updatedAt = new Date().toISOString();
+    await this.opts.store.updateListing(updated);
+    return updated;
+  }
+
+  /**
+   * Deletes a listing and its asset chain. Refuses if the listing has any
+   * purchase — those carry buyer licenses/receipts whose verification must keep
+   * working; the creator should archive (unlist) such listings instead.
+   */
+  async deleteListing(listingId: ListingId): Promise<{ deleted: true }> {
+    const { store } = this.opts;
+    const listing = await store.getListing(listingId);
+    if (!listing) throw new Error("Listing not found.");
+    const hasPurchases = (await store.listPurchases()).some(
+      (entry) => entry.listingId === listingId
+    );
+    if (hasPurchases) {
+      throw new Error(
+        "This listing has purchases and cannot be deleted; archive (unlist) it instead so buyers keep verifiable receipts."
+      );
+    }
+    await store.deleteListingCascade(listingId);
+    return { deleted: true };
   }
 
   async createLockedListing(input: CreateListingInput): Promise<{

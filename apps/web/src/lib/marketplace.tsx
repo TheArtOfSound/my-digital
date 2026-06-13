@@ -120,7 +120,23 @@ export interface LockedAssetVerification {
 interface MarketplaceActions {
   refresh(): Promise<void>;
   ensureCreator(input: { displayName: string; handle: string; email: string }): Promise<Creator>;
+  updateCreatorProfile(input: {
+    displayName?: string;
+    handle?: string;
+    bio?: string;
+    avatarUrl?: string;
+    websiteUrl?: string;
+  }): Promise<Creator>;
   createLockedListing(input: CreateLockedListingInput): Promise<CreateLockedListingResult>;
+  updateListing(input: {
+    listingId: ListingId;
+    title?: string;
+    description?: string;
+    priceAmount?: number;
+    priceCurrency?: string;
+    status?: "active" | "paused" | "archived";
+  }): Promise<Listing>;
+  deleteListing(listingId: ListingId): Promise<void>;
   buyListing(input: {
     listingId: ListingId;
     email: string;
@@ -247,6 +263,24 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
         const creator = await api.ensureCreator(input);
         await refresh();
         return creator;
+      },
+
+      async updateCreatorProfile(input) {
+        const creator = await api.updateCreator(input);
+        await refresh();
+        return creator;
+      },
+
+      async updateListing(input) {
+        const { listingId, ...rest } = input;
+        const listing = await api.updateListing(listingId, rest);
+        await refresh();
+        return listing;
+      },
+
+      async deleteListing(listingId) {
+        await api.deleteListing(listingId);
+        await refresh();
       },
 
       async createLockedListing(input) {

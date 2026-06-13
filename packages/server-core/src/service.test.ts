@@ -118,6 +118,93 @@ describe("MarketplaceService listing", () => {
   });
 });
 
+describe("MarketplaceService creator profile", () => {
+  it("updates profile fields and normalizes/validates them", async () => {
+    const { service } = await makeService();
+    await service.ensureCreator({ displayName: "C", handle: "c", email: "c@example.com" });
+
+    const updated = await service.updateCreatorProfile({
+      displayName: "Renamed Maker",
+      handle: "Renamed-Maker",
+      bio: "I make verified prompt packs.",
+      avatarUrl: "https://cdn.example.com/a.png",
+      websiteUrl: "https://maker.example.com"
+    });
+    expect(updated.displayName).toBe("Renamed Maker");
+    expect(updated.handle).toBe("renamed-maker");
+    expect(updated.bio).toBe("I make verified prompt packs.");
+    expect(updated.avatarUrl).toBe("https://cdn.example.com/a.png");
+
+    const state = await service.getState();
+    expect(state.creator?.handle).toBe("renamed-maker");
+
+    // Clearing optional fields with empty strings removes them.
+    const cleared = await service.updateCreatorProfile({ bio: "", websiteUrl: "" });
+    expect(cleared.bio).toBeUndefined();
+    expect(cleared.websiteUrl).toBeUndefined();
+
+    await expect(service.updateCreatorProfile({ handle: "no spaces!" })).rejects.toThrow(/Handle/);
+    await expect(service.updateCreatorProfile({ avatarUrl: "ftp://nope" })).rejects.toThrow(
+      /Avatar/
+    );
+    await expect(
+      service.updateCreatorProfile({ avatarUrl: `data:image/png;base64,${"A".repeat(400_000)}` })
+    ).rejects.toThrow(/too large/);
+  });
+
+  it("refuses a profile update before any creator exists", async () => {
+    const { service } = await makeService();
+    await expect(service.updateCreatorProfile({ displayName: "X" })).rejects.toThrow(
+      /Create the creator/
+    );
+  });
+});
+
+describe("MarketplaceService listing management", () => {
+  it("edits a listing's title, price, and status with validation", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    const updated = await service.updateListing({
+      listingId: listing.id,
+      title: "Updated Pack",
+      priceAmount: 2500,
+      status: "paused"
+    });
+    expect(updated.title).toBe("Updated Pack");
+    expect(updated.priceAmount).toBe(2500);
+    expect(updated.status).toBe("paused");
+    expect(updated.updatedAt >= listing.updatedAt).toBe(true);
+
+    await expect(
+      service.updateListing({ listingId: listing.id, status: "nonsense" as never })
+    ).rejects.toThrow(/Status/);
+    await expect(
+      service.updateListing({ listingId: listing.id, priceAmount: -1 })
+    ).rejects.toThrow(/Price/);
+  });
+
+  it("deletes an unsold listing and tears down its asset chain", async () => {
+    const { service, store } = await makeService();
+    const { listing, lockedAsset } = await seedListing(service);
+    const result = await service.deleteListing(listing.id);
+    expect(result.deleted).toBe(true);
+    expect(await store.getListing(listing.id)).toBeNull();
+    expect(await store.getLockedPayload(lockedAsset.id)).toBeNull();
+    expect(await store.getCustodySecret(lockedAsset.id)).toBeNull();
+    expect(await store.listAssets()).toHaveLength(0);
+    expect(await store.listAssetVersions()).toHaveLength(0);
+  });
+
+  it("refuses to delete a listing with a purchase, keeping buyer proof intact", async () => {
+    const { service, store } = await makeService();
+    const { listing } = await seedListing(service);
+    await service.checkout({ listingId: listing.id, email: "buyer@example.com" });
+    await expect(service.deleteListing(listing.id)).rejects.toThrow(/archive/i);
+    expect(await store.getListing(listing.id)).not.toBeNull();
+    expect(await store.listLicenses()).toHaveLength(1);
+  });
+});
+
 describe("MarketplaceService checkout", () => {
   it("paid checkout issues a verifiable license and a buyer vault that unlocks locally", async () => {
     const { service, store } = await makeService();
@@ -530,6 +617,33 @@ describe("HTTP app", () => {
     const stateJson = (await state.json()) as { licenses: unknown[]; listings: unknown[] };
     expect(stateJson.listings).toHaveLength(1);
     expect(stateJson.licenses).toHaveLength(1);
+  });
+
+  it("supports creator profile update and listing edit/delete over HTTP", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    const app = createApp(service);
+
+    const patchCreator = await app.request("/api/creator", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ displayName: "HTTP Maker", bio: "HTTP bio" })
+    });
+    expect(patchCreator.status).toBe(200);
+    expect(((await patchCreator.json()) as { bio: string }).bio).toBe("HTTP bio");
+
+    const patchListing = await app.request(`/api/listings/${listing.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "paused" })
+    });
+    expect(patchListing.status).toBe(200);
+    expect(((await patchListing.json()) as { status: string }).status).toBe("paused");
+
+    const del = await app.request(`/api/listings/${listing.id}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    expect(((await del.json()) as { deleted: boolean }).deleted).toBe(true);
+    expect((await service.getState()).listings).toHaveLength(0);
   });
 
   it("maps service errors to JSON errors", async () => {

@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import { CreatorBadge } from "../components/CreatorBadge";
 import { BUYER_FLOW, FlowStepper } from "../components/FlowStepper";
 import { LicenseTermsView } from "../components/LicenseTermsView";
 import { ProofPreview } from "../components/ProofPreview";
@@ -50,6 +51,13 @@ export function ListingPage() {
             : "Buying issues a buyer-specific license, a one-time access key, and a signed proof receipt. Payment is simulated by the mock adapter — no real charge."}
         </div>
       </section>
+
+      {state.creator && (
+        <section className="panel">
+          <h2>Sold by</h2>
+          <CreatorBadge creator={state.creator} />
+        </section>
+      )}
 
       <ProofPreview heading="What you receive when you buy this" />
 

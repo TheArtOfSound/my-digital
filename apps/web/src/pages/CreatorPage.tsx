@@ -1,6 +1,8 @@
 import type { LicenseId } from "@my-digital/types";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { CreatorListingsManager } from "../components/CreatorListingsManager";
+import { CreatorProfileEditor } from "../components/CreatorProfileEditor";
 import { CreatorSetup } from "../components/CreatorSetup";
 import { copyToClipboard, downloadJson, formatDate, formatPrice, shortHash, shortId } from "../lib/format";
 import { useMarketplace } from "../lib/marketplace";
@@ -82,39 +84,9 @@ export function CreatorPage() {
         {error && <p className="panel-error">{error}</p>}
       </section>
 
-      <section className="panel">
-        <h2>Listings ({state.listings.length})</h2>
-        {state.listings.length === 0 ? (
-          <p>
-            Nothing listed yet. <Link to="/sell">Lock and list a product</Link>.
-          </p>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Title</th>
-                <th>Price</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.listings.map((listing) => (
-                <tr key={listing.id}>
-                  <td>{listing.title}</td>
-                  <td>{formatPrice(listing.priceAmount, listing.priceCurrency)}</td>
-                  <td>{listing.status}</td>
-                  <td>
-                    <Link className="btn btn-ghost btn-small" to={`/listing/${listing.id}`}>
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <CreatorProfileEditor creator={creator} />
+
+      <CreatorListingsManager />
 
       <section className="panel">
         <h2>Purchases ({state.purchases.length})</h2>

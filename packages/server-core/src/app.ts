@@ -74,6 +74,17 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     return c.json(await service.ensureCreator(body), 201);
   });
 
+  app.patch("/api/creator", async (c) => {
+    const body = await c.req.json<{
+      displayName?: string;
+      handle?: string;
+      bio?: string;
+      avatarUrl?: string;
+      websiteUrl?: string;
+    }>();
+    return c.json(await service.updateCreatorProfile(body));
+  });
+
   app.post("/api/listings", async (c) => {
     const body = await c.req.json<CreateListingBody>();
     if (typeof body.payloadB64 !== "string" || body.payloadB64.length > 1_400_000) {
@@ -92,6 +103,23 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     });
     return c.json(result, 201);
   });
+
+  app.patch("/api/listings/:id", async (c) => {
+    const body = await c.req.json<{
+      title?: string;
+      description?: string;
+      priceAmount?: number;
+      priceCurrency?: string;
+      status?: "active" | "paused" | "archived";
+    }>();
+    return c.json(
+      await service.updateListing({ listingId: c.req.param("id") as ListingId, ...body })
+    );
+  });
+
+  app.delete("/api/listings/:id", async (c) =>
+    c.json(await service.deleteListing(c.req.param("id") as ListingId))
+  );
 
   app.post("/api/checkout", async (c) => {
     const body = await c.req.json<CheckoutBody>();

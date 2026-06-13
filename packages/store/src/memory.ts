@@ -75,6 +75,9 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   async listCreators(): Promise<Creator[]> {
     return [...this.creators.values()].map(clone);
   }
+  async updateCreator(creator: Creator): Promise<void> {
+    this.creators.set(creator.id, clone(creator));
+  }
 
   async insertBuyer(buyer: Buyer): Promise<void> {
     this.buyers.set(buyer.id, clone(buyer));
@@ -199,6 +202,34 @@ export class MemoryMarketplaceStore implements MarketplaceStore {
   }
   async listListings(): Promise<Listing[]> {
     return [...this.listings.values()].map(clone);
+  }
+  async updateListing(listing: Listing): Promise<void> {
+    this.listings.set(listing.id, clone(listing));
+  }
+  async deleteListingCascade(id: ListingId): Promise<void> {
+    const listing = this.listings.get(id);
+    if (!listing) return;
+    this.listings.delete(id);
+    // Only tear down the asset chain if no other listing still points at it.
+    const assetStillUsed = [...this.listings.values()].some(
+      (entry) => entry.assetId === listing.assetId
+    );
+    if (assetStillUsed) return;
+    for (const version of [...this.assetVersions.values()].filter(
+      (entry) => entry.assetId === listing.assetId
+    )) {
+      const locked = [...this.lockedAssets.values()].find(
+        (entry) => entry.assetVersionId === version.id
+      );
+      if (locked) {
+        this.lockedPayloads.delete(locked.id);
+        this.custodySecrets.delete(locked.id);
+        this.lockedAssets.delete(locked.id);
+      }
+      this.assetVersions.delete(version.id);
+      this.manifests.delete(version.id);
+    }
+    this.assets.delete(listing.assetId);
   }
 
   async insertPurchase(purchase: Purchase): Promise<void> {
