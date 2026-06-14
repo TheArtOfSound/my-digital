@@ -46,6 +46,7 @@ import type {
   TraceResult,
   UnlockCode,
   User,
+  UserId,
   VerificationResult
 } from "@my-digital/types";
 import {
@@ -124,6 +125,9 @@ function publicCreatorCard(creator: Creator): Creator {
 
 export interface ServerState {
   issuer: { name: string; publicKeyB64: string };
+  /** Public cards for every seller with a visible listing (multi-seller). */
+  creators: Creator[];
+  /** First seller, kept for backward compatibility; prefer `creators`. */
   creator: Creator | null;
   buyers: Buyer[];
   assets: Asset[];
@@ -136,6 +140,18 @@ export interface ServerState {
   receipts: ProofReceipt[];
   revocations: Revocation[];
   fingerprints: Fingerprint[];
+}
+
+/** A seller's own console view: their profile plus only their listings/sales. */
+export interface SellerDashboard {
+  creator: Creator;
+  listings: Listing[];
+  assets: Asset[];
+  assetVersions: AssetVersion[];
+  lockedAssets: LockedAsset[];
+  purchases: Purchase[];
+  licenses: BuyerLicense[];
+  receipts: ProofReceipt[];
 }
 
 export interface CreateListingInput {
@@ -210,12 +226,20 @@ export class MarketplaceService {
       await Promise.all(assetVersions.map((version) => store.getLockedAssetByVersion(version.id)))
     ).filter((entry): entry is LockedAsset => entry !== null);
 
+    const allCreators = await store.listCreators();
+
     if (!includePrivate) {
       // Only expose product metadata for listings buyers can actually see.
       const versionIds = new Set(listings.map((listing) => listing.activeAssetVersionId));
       const assetIds = new Set(listings.map((listing) => listing.assetId));
+      // Public cards only for sellers who have a visible listing.
+      const sellerIds = new Set(listings.map((listing) => listing.creatorId));
+      const creators = allCreators
+        .filter((entry) => sellerIds.has(entry.id))
+        .map(publicCreatorCard);
       return {
         issuer: this.issuerInfo(),
+        creators,
         creator: creator ? publicCreatorCard(creator) : null,
         buyers: [],
         assets: assets.filter((asset) => assetIds.has(asset.id)),
@@ -239,6 +263,7 @@ export class MarketplaceService {
     }
     return {
       issuer: this.issuerInfo(),
+      creators: allCreators,
       creator,
       buyers: await store.listBuyers(),
       assets,
@@ -350,16 +375,118 @@ export class MarketplaceService {
     return user ? this.toPublicUser(user) : null;
   }
 
+  // --- Sellers (multi-seller) ---
+
+  /**
+   * Resolves which creator the caller acts as. With an authenticated userId it
+   * must be that user's own seller profile — ownership is enforced server-side,
+   * never trusted from the client. Without one (tests / legacy single-seller)
+   * it falls back to the first creator.
+   */
+  private async resolveActingCreator(actingUserId?: UserId): Promise<Creator> {
+    const { store } = this.opts;
+    if (actingUserId) {
+      const owned = await store.getCreatorByUserId(actingUserId);
+      if (!owned) throw new Error("You don't have a seller profile yet. Become a seller first.");
+      return owned;
+    }
+    const first = (await store.listCreators())[0];
+    if (!first) throw new Error("Create the creator profile first.");
+    return first;
+  }
+
+  /** Derives a unique, valid handle from a display name. */
+  private async uniqueHandle(base: string): Promise<string> {
+    const root =
+      base
+        .toLowerCase()
+        .replace(/[^a-z0-9-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 28) || "seller";
+    const stem = root.length >= 2 ? root : "seller";
+    const taken = new Set((await this.opts.store.listCreators()).map((entry) => entry.handle));
+    if (!taken.has(stem)) return stem;
+    for (let i = 2; i < 100000; i++) {
+      const candidate = `${stem}-${i}`.slice(0, 32);
+      if (!taken.has(candidate)) return candidate;
+    }
+    return `${stem}-${Date.now().toString(36)}`.slice(0, 32);
+  }
+
+  /**
+   * Turns an account into a seller by creating (once) a creator profile owned
+   * by that user. Idempotent: returns the existing profile if present.
+   */
+  async becomeSeller(
+    userId: UserId,
+    input?: { displayName?: string; handle?: string }
+  ): Promise<Creator> {
+    const { store } = this.opts;
+    const existing = await store.getCreatorByUserId(userId);
+    if (existing) return existing;
+    const user = await store.getUserById(userId);
+    if (!user) throw new Error("Account not found.");
+    const displayName = (input?.displayName?.trim() || user.displayName).slice(0, 80);
+    let handle = input?.handle?.trim().toLowerCase();
+    if (handle) {
+      if (!/^[a-z0-9][a-z0-9-]{1,31}$/.test(handle)) {
+        throw new Error("Handle must be 2–32 chars: lowercase letters, numbers, hyphens.");
+      }
+      if ((await store.listCreators()).some((entry) => entry.handle === handle)) {
+        throw new Error("That handle is taken. Choose another.");
+      }
+    } else {
+      handle = await this.uniqueHandle(displayName);
+    }
+    const base = await createCreator({ displayName, handle, email: user.email });
+    const creator: Creator = { ...base, userId };
+    await store.insertCreator(creator);
+    return creator;
+  }
+
+  /** The signed-in seller's own console: their profile, listings, and sales only. */
+  async getSellerDashboard(userId: UserId): Promise<SellerDashboard | null> {
+    const { store } = this.opts;
+    const creator = await store.getCreatorByUserId(userId);
+    if (!creator) return null;
+    const listings = (await store.listListings()).filter(
+      (listing) => listing.creatorId === creator.id
+    );
+    const listingIds = new Set(listings.map((listing) => listing.id));
+    const assetIds = new Set(listings.map((listing) => listing.assetId));
+    const versionIds = new Set(listings.map((listing) => listing.activeAssetVersionId));
+    const assets = (await store.listAssets()).filter((asset) => assetIds.has(asset.id));
+    const assetVersions = (await store.listAssetVersions()).filter((version) =>
+      versionIds.has(version.id)
+    );
+    const lockedAssets = (
+      await Promise.all(assetVersions.map((version) => store.getLockedAssetByVersion(version.id)))
+    ).filter((entry): entry is LockedAsset => entry !== null);
+    const purchases = (await store.listPurchases()).filter((purchase) =>
+      listingIds.has(purchase.listingId)
+    );
+    const purchaseIds = new Set(purchases.map((purchase) => purchase.id));
+    const licenses = (await store.listLicenses()).filter((license) =>
+      purchaseIds.has(license.purchaseId)
+    );
+    const receipts = (await store.listProofReceipts()).filter((receipt) =>
+      purchaseIds.has(receipt.purchaseId)
+    );
+    return { creator, listings, assets, assetVersions, lockedAssets, purchases, licenses, receipts };
+  }
+
   /** Edits the creator's mutable profile (name, handle, bio, avatar, website). */
-  async updateCreatorProfile(input: {
-    displayName?: string;
-    handle?: string;
-    bio?: string;
-    avatarUrl?: string;
-    websiteUrl?: string;
-  }): Promise<Creator> {
-    const existing = (await this.opts.store.listCreators())[0];
-    if (!existing) throw new Error("Create the creator profile first.");
+  async updateCreatorProfile(
+    input: {
+      displayName?: string;
+      handle?: string;
+      bio?: string;
+      avatarUrl?: string;
+      websiteUrl?: string;
+    },
+    actingUserId?: UserId
+  ): Promise<Creator> {
+    const existing = await this.resolveActingCreator(actingUserId);
 
     const updated: Creator = { ...existing };
     if (input.displayName !== undefined) {
@@ -375,6 +502,12 @@ export class MarketplaceService {
         throw new Error(
           "Handle must be 2–32 characters: lowercase letters, numbers, and hyphens, starting alphanumeric."
         );
+      }
+      if (handle !== existing.handle) {
+        const taken = (await this.opts.store.listCreators()).some(
+          (entry) => entry.handle === handle && entry.id !== existing.id
+        );
+        if (taken) throw new Error("That handle is taken. Choose another.");
       }
       updated.handle = handle;
     }
@@ -414,16 +547,23 @@ export class MarketplaceService {
   }
 
   /** Edits a listing's mutable fields, including pause/activate/archive. */
-  async updateListing(input: {
-    listingId: ListingId;
-    title?: string;
-    description?: string;
-    priceAmount?: number;
-    priceCurrency?: string;
-    status?: Listing["status"];
-  }): Promise<Listing> {
+  async updateListing(
+    input: {
+      listingId: ListingId;
+      title?: string;
+      description?: string;
+      priceAmount?: number;
+      priceCurrency?: string;
+      status?: Listing["status"];
+    },
+    actingUserId?: UserId
+  ): Promise<Listing> {
     const listing = await this.opts.store.getListing(input.listingId);
     if (!listing) throw new Error("Listing not found.");
+    const acting = await this.resolveActingCreator(actingUserId);
+    if (listing.creatorId !== acting.id) {
+      throw new Error("That listing belongs to another seller.");
+    }
     const updated: Listing = { ...listing };
     if (input.title !== undefined) {
       const title = input.title.trim();
@@ -470,10 +610,17 @@ export class MarketplaceService {
    * purchase — those carry buyer licenses/receipts whose verification must keep
    * working; the creator should archive (unlist) such listings instead.
    */
-  async deleteListing(listingId: ListingId): Promise<{ deleted: true }> {
+  async deleteListing(
+    listingId: ListingId,
+    actingUserId?: UserId
+  ): Promise<{ deleted: true }> {
     const { store } = this.opts;
     const listing = await store.getListing(listingId);
     if (!listing) throw new Error("Listing not found.");
+    const acting = await this.resolveActingCreator(actingUserId);
+    if (listing.creatorId !== acting.id) {
+      throw new Error("That listing belongs to another seller.");
+    }
     const hasPurchases = (await store.listPurchases()).some(
       (entry) => entry.listingId === listingId
     );
@@ -523,10 +670,11 @@ export class MarketplaceService {
    * are derived server-side from the configured public origin — never taken
    * from the request — so they can't be turned into an open redirect.
    */
-  async startCreatorPayoutOnboarding(): Promise<{ url: string; accountId: string }> {
+  async startCreatorPayoutOnboarding(
+    actingUserId?: UserId
+  ): Promise<{ url: string; accountId: string }> {
     const { store } = this.opts;
-    const creator = (await store.listCreators())[0];
-    if (!creator) throw new Error("Create the creator profile first.");
+    const creator = await this.resolveActingCreator(actingUserId);
     const connect = this.connectAdapter();
     let accountId = creator.stripeAccountId;
     if (!accountId) {
@@ -543,15 +691,14 @@ export class MarketplaceService {
   }
 
   /** Re-checks the connected account with Stripe and stores the payout status. */
-  async refreshCreatorPayoutStatus(): Promise<{
+  async refreshCreatorPayoutStatus(actingUserId?: UserId): Promise<{
     stripeAccountId?: string;
     chargesEnabled: boolean;
     payoutsEnabled: boolean;
     detailsSubmitted: boolean;
   }> {
     const { store } = this.opts;
-    const creator = (await store.listCreators())[0];
-    if (!creator) throw new Error("Create the creator profile first.");
+    const creator = await this.resolveActingCreator(actingUserId);
     if (!creator.stripeAccountId) {
       return { chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false };
     }
@@ -567,15 +714,17 @@ export class MarketplaceService {
     };
   }
 
-  async createLockedListing(input: CreateListingInput): Promise<{
+  async createLockedListing(
+    input: CreateListingInput,
+    actingUserId?: UserId
+  ): Promise<{
     asset: Asset;
     assetVersion: AssetVersion;
     lockedAsset: LockedAsset;
     listing: Listing;
   }> {
     const { store, envelope, keystore } = this.opts;
-    const creator = (await store.listCreators())[0];
-    if (!creator) throw new Error("Create the creator profile first.");
+    const creator = await this.resolveActingCreator(actingUserId);
     if (input.payload.byteLength === 0) {
       throw new Error("The product content is empty.");
     }
@@ -666,19 +815,25 @@ export class MarketplaceService {
     listingId: ListingId;
     email: string;
     displayName?: string;
+    /** When the buyer is signed in, ties the purchase to their account. */
+    buyerUserId?: UserId;
   }): Promise<{ purchase: Purchase; session: CheckoutSession }> {
     const { store, payments } = this.opts;
     const listing = await store.getListing(input.listingId);
     if (!listing) throw new Error("Listing not found.");
 
     const emailHash = await hashEmail(input.email);
-    let buyer = await store.getBuyerByEmailHash(emailHash);
+    // Signed-in buyers attach to their account buyer; guests use the email hash.
+    let buyer: Buyer | null = input.buyerUserId
+      ? await store.getBuyerByUserId(input.buyerUserId)
+      : await store.getBuyerByEmailHash(emailHash);
     if (!buyer) {
-      buyer = await createBuyer(
+      const base = await createBuyer(
         input.displayName !== undefined
           ? { email: input.email, displayName: input.displayName }
           : { email: input.email }
       );
+      buyer = input.buyerUserId ? { ...base, userId: input.buyerUserId } : base;
       await store.insertBuyer(buyer);
     }
 
@@ -1056,30 +1211,35 @@ export class MarketplaceService {
     };
   }
 
-  /**
-   * Buyer library lookup by email hash. Dev convenience, not authentication:
-   * production buyer accounts arrive with real auth.
-   */
-  async getBuyerLibrary(emailHash: string): Promise<{
+  private async buildLibrary(buyer: Buyer): Promise<{
     buyer: Buyer;
     purchases: Purchase[];
     licenses: BuyerLicense[];
     receipts: ProofReceipt[];
-  } | null> {
+  }> {
     const { store } = this.opts;
-    const buyer = await store.getBuyerByEmailHash(emailHash);
-    if (!buyer) return null;
-    const purchases = (await store.listPurchases()).filter(
-      (entry) => entry.buyerId === buyer.id
-    );
-    const licenses = (await store.listLicenses()).filter(
-      (entry) => entry.buyerId === buyer.id
-    );
+    const purchases = (await store.listPurchases()).filter((entry) => entry.buyerId === buyer.id);
+    const licenses = (await store.listLicenses()).filter((entry) => entry.buyerId === buyer.id);
     const licenseIds = new Set(licenses.map((entry) => entry.id as string));
     const receipts = (await store.listProofReceipts()).filter((entry) =>
       licenseIds.has(entry.licenseId)
     );
     return { buyer, purchases, licenses, receipts };
+  }
+
+  /**
+   * Buyer library lookup by email hash. Dev convenience for guest buyers, not
+   * authentication; signed-in buyers should use getBuyerLibraryByUser.
+   */
+  async getBuyerLibrary(emailHash: string) {
+    const buyer = await this.opts.store.getBuyerByEmailHash(emailHash);
+    return buyer ? this.buildLibrary(buyer) : null;
+  }
+
+  /** The signed-in buyer's library, resolved by their account. */
+  async getBuyerLibraryByUser(userId: UserId) {
+    const buyer = await this.opts.store.getBuyerByUserId(userId);
+    return buyer ? this.buildLibrary(buyer) : null;
   }
 
   /** Destructive dev reset: wipes all records and bootstraps a fresh issuer. */

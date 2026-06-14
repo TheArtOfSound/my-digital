@@ -7,7 +7,7 @@ import {
 } from "@my-digital/payments-stripe";
 import { MemoryMarketplaceStore, type MarketplaceStore } from "@my-digital/store";
 import { openSqliteStore } from "@my-digital/store/node";
-import type { LicenseId, ListingId } from "@my-digital/types";
+import type { LicenseId, ListingId, UserId } from "@my-digital/types";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -821,31 +821,83 @@ describe("HTTP app", () => {
     expect(stateJson.licenses).toHaveLength(1);
   });
 
-  it("supports creator profile update and listing edit/delete over HTTP", async () => {
+  it("supports seller profile update and listing edit/delete over a session", async () => {
     const { service } = await makeService();
-    const { listing } = await seedListing(service);
     const app = createApp(service);
+
+    // Sign up, become a seller, and create a listing — all under one session.
+    const signup = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "seller@example.com",
+        password: "longpassword1",
+        displayName: "Seller One"
+      })
+    });
+    const token = /md_session=([^;]+)/.exec(signup.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    const cookie = `md_session=${token}`;
+
+    const become = await app.request("/api/seller", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "{}"
+    });
+    expect(become.status).toBe(201);
+
+    const created = await app.request("/api/listings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        title: "Session Pack",
+        description: "x",
+        category: "templates",
+        priceAmount: 1500,
+        priceCurrency: "USD",
+        licenseTerms: {
+          personalUse: true,
+          commercialUse: false,
+          clientWorkAllowed: false,
+          redistributionAllowed: false,
+          resaleAllowed: false,
+          aiTrainingAllowed: false,
+          attributionRequired: true,
+          seatCount: 1
+        },
+        fileName: "a.txt",
+        mimeType: "text/plain",
+        payloadB64: Buffer.from("hello").toString("base64")
+      })
+    });
+    expect(created.status).toBe(201);
+    const listingId = ((await created.json()) as { listing: { id: string } }).listing.id;
 
     const patchCreator = await app.request("/api/creator", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ displayName: "HTTP Maker", bio: "HTTP bio" })
     });
     expect(patchCreator.status).toBe(200);
     expect(((await patchCreator.json()) as { bio: string }).bio).toBe("HTTP bio");
 
-    const patchListing = await app.request(`/api/listings/${listing.id}`, {
+    const patchListing = await app.request(`/api/listings/${listingId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ status: "paused" })
     });
     expect(patchListing.status).toBe(200);
     expect(((await patchListing.json()) as { status: string }).status).toBe("paused");
 
-    const del = await app.request(`/api/listings/${listing.id}`, { method: "DELETE" });
+    const del = await app.request(`/api/listings/${listingId}`, {
+      method: "DELETE",
+      headers: { Cookie: cookie }
+    });
     expect(del.status).toBe(200);
     expect(((await del.json()) as { deleted: boolean }).deleted).toBe(true);
-    expect((await service.getState()).listings).toHaveLength(0);
+
+    // The seller dashboard now shows no listings for this seller.
+    const dash = await app.request("/api/seller/dashboard", { headers: { Cookie: cookie } });
+    expect(((await dash.json()) as { listings: unknown[] }).listings).toHaveLength(0);
   });
 
   it("maps service errors to JSON errors", async () => {
@@ -872,29 +924,26 @@ describe("HTTP app", () => {
     expect(allowed.status).toBe(200);
   });
 
-  it("gates creator/listing mutations behind the admin token but leaves buyer flows open", async () => {
+  it("requires a session for seller mutations; buyer checkout stays open", async () => {
     const { service } = await makeService();
     const { listing } = await seedListing(service);
-    const app = createApp(service, { adminToken: "secret-token" });
+    const app = createApp(service);
 
-    const noTokenPatch = await app.request("/api/creator", {
+    // No session -> 401 on seller-only operations.
+    const noAuthPatch = await app.request("/api/creator", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ bio: "blocked" })
     });
-    expect(noTokenPatch.status).toBe(401);
+    expect(noAuthPatch.status).toBe(401);
 
-    const noTokenDelete = await app.request(`/api/listings/${listing.id}`, { method: "DELETE" });
-    expect(noTokenDelete.status).toBe(401);
+    const noAuthDelete = await app.request(`/api/listings/${listing.id}`, { method: "DELETE" });
+    expect(noAuthDelete.status).toBe(401);
 
-    const noTokenOnboard = await app.request("/api/creator/payouts/onboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ returnUrl: "https://x/r", refreshUrl: "https://x/f" })
-    });
-    expect(noTokenOnboard.status).toBe(401);
+    const noAuthOnboard = await app.request("/api/creator/payouts/onboard", { method: "POST" });
+    expect(noAuthOnboard.status).toBe(401);
 
-    // Buyers can still check out without the management token.
+    // Buyers can still check out without an account.
     const openCheckout = await app.request("/api/checkout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -902,9 +951,22 @@ describe("HTTP app", () => {
     });
     expect(openCheckout.status).toBe(201);
 
+    // A signed-in seller can edit their own profile.
+    const signup = await app.request("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "owner@example.com", password: "longpassword1", displayName: "Owner" })
+    });
+    const token = /md_session=([^;]+)/.exec(signup.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    const cookie = `md_session=${token}`;
+    await app.request("/api/seller", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "{}"
+    });
     const okPatch = await app.request("/api/creator", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer secret-token" },
+      headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ bio: "gated bio" })
     });
     expect(okPatch.status).toBe(200);
@@ -942,5 +1004,100 @@ describe("HTTP app", () => {
 
     const api = await app.request("/api/health");
     expect(((await api.json()) as { ok: boolean }).ok).toBe(true);
+  });
+});
+
+describe("Multi-seller marketplace", () => {
+  async function makeSeller(service: MarketplaceService, email: string, displayName: string) {
+    const { user } = await service.signup({ email, password: "longpassword1", displayName });
+    const creator = await service.becomeSeller(user.id);
+    return { user, creator };
+  }
+  async function listFor(service: MarketplaceService, userId: UserId, title: string) {
+    const result = await service.createLockedListing(
+      {
+        title,
+        description: "d",
+        category: "templates",
+        priceAmount: 1200,
+        priceCurrency: "USD",
+        licenseTerms: demoPersonalLicenseTerms,
+        fileName: "f.txt",
+        mimeType: "text/plain",
+        payload: utf8Bytes(title)
+      },
+      userId
+    );
+    return result.listing;
+  }
+
+  it("gives each seller a unique handle, isolates dashboards, and enforces ownership", async () => {
+    const { service } = await makeService();
+    const a = await makeSeller(service, "a@example.com", "Alpha");
+    const b = await makeSeller(service, "b@example.com", "Bravo");
+    expect(a.creator.handle).not.toBe(b.creator.handle);
+    const la = await listFor(service, a.user.id, "Alpha Pack");
+    await listFor(service, b.user.id, "Bravo Pack");
+
+    expect((await service.getSellerDashboard(a.user.id))?.listings.map((l) => l.title)).toEqual([
+      "Alpha Pack"
+    ]);
+    expect((await service.getSellerDashboard(b.user.id))?.listings.map((l) => l.title)).toEqual([
+      "Bravo Pack"
+    ]);
+
+    await expect(
+      service.updateListing({ listingId: la.id, status: "paused" }, b.user.id)
+    ).rejects.toThrow(/another seller/);
+    await expect(service.deleteListing(la.id, b.user.id)).rejects.toThrow(/another seller/);
+    const paused = await service.updateListing({ listingId: la.id, status: "paused" }, a.user.id);
+    expect(paused.status).toBe("paused");
+  });
+
+  it("becomeSeller is idempotent", async () => {
+    const { service } = await makeService();
+    const { user } = await service.signup({
+      email: "c@example.com",
+      password: "longpassword1",
+      displayName: "Cee"
+    });
+    const first = await service.becomeSeller(user.id);
+    const again = await service.becomeSeller(user.id);
+    expect(again.id).toBe(first.id);
+  });
+
+  it("public state lists every seller with an active listing, PII stripped", async () => {
+    const { service } = await makeService();
+    const a = await makeSeller(service, "a2@example.com", "Alpha2");
+    const b = await makeSeller(service, "b2@example.com", "Bravo2");
+    await listFor(service, a.user.id, "A2");
+    await listFor(service, b.user.id, "B2");
+    const state = await service.getState();
+    expect(state.creators.map((cr) => cr.id).sort()).toEqual([a.creator.id, b.creator.id].sort());
+    for (const card of state.creators) expect(card.emailHash).toBe("");
+  });
+
+  it("ties a signed-in buyer's purchase to their account library", async () => {
+    const { service } = await makeService();
+    const seller = await makeSeller(service, "seller2@example.com", "Seller2");
+    const listing = await listFor(service, seller.user.id, "Buy Me");
+    const buyer = await service.signup({
+      email: "buyer2@example.com",
+      password: "longpassword1",
+      displayName: "Buyer2"
+    });
+    const begun = await service.beginCheckout({
+      listingId: listing.id,
+      email: "buyer2@example.com",
+      buyerUserId: buyer.user.id
+    });
+    const outcome = await service.completeCheckout({
+      purchaseId: begun.purchase.id,
+      simulateOutcome: "paid"
+    });
+    expect(outcome.outcome).toBe("paid");
+    const lib = await service.getBuyerLibraryByUser(buyer.user.id);
+    expect(lib?.purchases).toHaveLength(1);
+    expect(lib?.licenses).toHaveLength(1);
   });
 });

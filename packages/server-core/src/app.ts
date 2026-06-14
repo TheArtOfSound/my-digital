@@ -133,16 +133,30 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     c.json({ user: await service.getSessionUser(readCookie(c.req.header("cookie"), SESSION_COOKIE)) })
   );
 
-  app.post("/api/creator", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
-    const body = await c.req.json<{ displayName: string; handle: string; email: string }>();
-    return c.json(await service.ensureCreator(body), 201);
+  // Resolve the signed-in account (or null) from the request's session cookie.
+  const currentUser = (c: Context) =>
+    service.getSessionUser(readCookie(c.req.header("cookie"), SESSION_COOKIE));
+
+  // Become a seller: creates (once) the signed-in account's seller profile.
+  app.post("/api/seller", async (c) => {
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to start selling." }, 401);
+    const body = await c.req
+      .json<{ displayName?: string; handle?: string }>()
+      .catch(() => ({}) as { displayName?: string; handle?: string });
+    return c.json(await service.becomeSeller(me.id, body), 201);
+  });
+
+  // The signed-in seller's own console: their listings + sales only.
+  app.get("/api/seller/dashboard", async (c) => {
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to view your seller dashboard." }, 401);
+    return c.json(await service.getSellerDashboard(me.id));
   });
 
   app.patch("/api/creator", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to edit your seller profile." }, 401);
     const body = await c.req.json<{
       displayName?: string;
       handle?: string;
@@ -150,46 +164,49 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
       avatarUrl?: string;
       websiteUrl?: string;
     }>();
-    return c.json(await service.updateCreatorProfile(body));
+    return c.json(await service.updateCreatorProfile(body, me.id));
   });
 
   app.post("/api/creator/payouts/onboard", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to set up payouts." }, 401);
     // Return URLs are derived server-side; nothing is read from the request body.
-    return c.json(await service.startCreatorPayoutOnboarding(), 201);
+    return c.json(await service.startCreatorPayoutOnboarding(me.id), 201);
   });
 
   app.post("/api/creator/payouts/refresh", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
-    return c.json(await service.refreshCreatorPayoutStatus());
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to refresh payouts." }, 401);
+    return c.json(await service.refreshCreatorPayoutStatus(me.id));
   });
 
   app.post("/api/listings", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to list a product." }, 401);
     const body = await c.req.json<CreateListingBody>();
     if (typeof body.payloadB64 !== "string" || body.payloadB64.length > 1_400_000) {
       return c.json({ error: "Payload is missing or exceeds the 1 MB limit." }, 413);
     }
-    const result = await service.createLockedListing({
-      title: body.title,
-      description: body.description,
-      category: body.category,
-      priceAmount: body.priceAmount,
-      priceCurrency: body.priceCurrency,
-      licenseTerms: body.licenseTerms,
-      fileName: body.fileName,
-      mimeType: body.mimeType,
-      payload: base64ToBytes(body.payloadB64)
-    });
+    const result = await service.createLockedListing(
+      {
+        title: body.title,
+        description: body.description,
+        category: body.category,
+        priceAmount: body.priceAmount,
+        priceCurrency: body.priceCurrency,
+        licenseTerms: body.licenseTerms,
+        fileName: body.fileName,
+        mimeType: body.mimeType,
+        payload: base64ToBytes(body.payloadB64)
+      },
+      me.id
+    );
     return c.json(result, 201);
   });
 
   app.patch("/api/listings/:id", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to edit listings." }, 401);
     const body = await c.req.json<{
       title?: string;
       description?: string;
@@ -198,14 +215,14 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
       status?: "active" | "paused" | "archived";
     }>();
     return c.json(
-      await service.updateListing({ listingId: c.req.param("id") as ListingId, ...body })
+      await service.updateListing({ listingId: c.req.param("id") as ListingId, ...body }, me.id)
     );
   });
 
   app.delete("/api/listings/:id", async (c) => {
-    const denied = requireAdmin(c);
-    if (denied) return denied;
-    return c.json(await service.deleteListing(c.req.param("id") as ListingId));
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to delete listings." }, 401);
+    return c.json(await service.deleteListing(c.req.param("id") as ListingId, me.id));
   });
 
   app.post("/api/checkout", async (c) => {
@@ -220,11 +237,13 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
   });
 
   app.post("/api/checkout/begin", async (c) => {
+    const me = await currentUser(c);
     const body = await c.req.json<{ listingId: string; email: string; displayName?: string }>();
     const begun = await service.beginCheckout({
       listingId: body.listingId as ListingId,
       email: body.email,
-      ...(body.displayName !== undefined ? { displayName: body.displayName } : {})
+      ...(body.displayName !== undefined ? { displayName: body.displayName } : {}),
+      ...(me ? { buyerUserId: me.id } : {})
     });
     return c.json(begun, 201);
   });
@@ -305,6 +324,13 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     const library = await service.getBuyerLibrary(c.req.param("emailHash"));
     if (!library) return c.json({ error: "No buyer exists for this email." }, 404);
     return c.json(library);
+  });
+
+  // The signed-in buyer's library, resolved by their account (no email needed).
+  app.get("/api/library/me", async (c) => {
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to view your library." }, 401);
+    return c.json((await service.getBuyerLibraryByUser(me.id)) ?? { buyer: null, purchases: [], licenses: [], receipts: [] });
   });
 
   app.post("/api/admin/reset", async (c) => {
