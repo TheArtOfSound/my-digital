@@ -656,6 +656,60 @@ describe("Direct payouts (Stripe Connect)", () => {
     expect(status.payoutsEnabled).toBe(false);
     expect((await store.listCreators())[0]?.payoutsEnabled).toBe(false);
   });
+
+  it("auto-grants the Verified badge once identity is submitted and payouts go live", async () => {
+    const { service } = await makeConnectService();
+    await seedListing(service);
+    // Identity alone is not enough.
+    await service.submitVerification({ legalName: "Ada Lovelace", location: "London, UK" });
+    expect((await service.getState()).creators[0]?.verificationStatus).toBe("unverified");
+    // Connecting live payouts flips the badge to verified and reveals identity.
+    await service.startCreatorPayoutOnboarding();
+    await service.refreshCreatorPayoutStatus();
+    const card = (await service.getState()).creators[0];
+    expect(card?.verificationStatus).toBe("verified");
+    expect(card?.legalName).toBe("Ada Lovelace");
+    expect(card?.location).toBe("London, UK");
+  });
+});
+
+describe("Seller verification", () => {
+  it("stores identity but stays unverified (and hidden) without payouts", async () => {
+    const { service } = await makeService();
+    await seedListing(service);
+    const updated = await service.submitVerification({
+      legalName: "Grace Hopper",
+      location: "New York, USA",
+      links: ["https://grace.example.com"]
+    });
+    expect(updated.verificationStatus).toBe("unverified");
+    expect(updated.legalName).toBe("Grace Hopper");
+    // Public card hides identity until verified.
+    const card = (await service.getState()).creators[0];
+    expect(card?.legalName).toBeUndefined();
+    expect(card?.verificationLinks).toBeUndefined();
+  });
+
+  it("manual review grants the reviewed tier and survives recompute", async () => {
+    const { service } = await makeService();
+    const { listing } = await seedListing(service);
+    const reviewed = await service.reviewCreator(listing.creatorId, true);
+    expect(reviewed.verificationStatus).toBe("reviewed");
+    // Submitting identity (which would otherwise compute "unverified") must not downgrade.
+    const after = await service.submitVerification({ legalName: "Ada", location: "London" });
+    expect(after.verificationStatus).toBe("reviewed");
+  });
+
+  it("rejects incomplete identity and non-http links", async () => {
+    const { service } = await makeService();
+    await seedListing(service);
+    await expect(
+      service.submitVerification({ legalName: "", location: "London" })
+    ).rejects.toThrow(/legal or business name/);
+    await expect(
+      service.submitVerification({ legalName: "Ada", location: "London", links: ["javascript:alert(1)"] })
+    ).rejects.toThrow(/http/);
+  });
 });
 
 describe("issuer persistence across restarts", () => {

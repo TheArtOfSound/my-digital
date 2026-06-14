@@ -1,6 +1,7 @@
 import { base64ToBytes } from "@my-digital/core";
 import { QEV_VAULT_SCHEMA } from "@my-digital/envelope";
 import type {
+  CreatorId,
   LicenseId,
   LicenseTerms,
   ListingId,
@@ -180,6 +181,15 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     return c.json(await service.refreshCreatorPayoutStatus(me.id));
   });
 
+  // The signed-in seller submits identity for the Verified badge (auto-granted
+  // once identity is complete and payouts are live).
+  app.post("/api/seller/verify", async (c) => {
+    const me = await currentUser(c);
+    if (!me) return c.json({ error: "Sign in to verify your seller profile." }, 401);
+    const body = await c.req.json<{ legalName: string; location: string; links?: string[] }>();
+    return c.json(await service.submitVerification(body, me.id));
+  });
+
   app.post("/api/listings", async (c) => {
     const me = await currentUser(c);
     if (!me) return c.json({ error: "Sign in to list a product." }, 401);
@@ -331,6 +341,18 @@ export function createApp(service: MarketplaceService, options: CreateAppOptions
     const me = await currentUser(c);
     if (!me) return c.json({ error: "Sign in to view your library." }, 401);
     return c.json((await service.getBuyerLibraryByUser(me.id)) ?? { buyer: null, purchases: [], licenses: [], receipts: [] });
+  });
+
+  // Platform-admin: grant/revoke the manual "Reviewed by Imagine Qira" tier.
+  app.post("/api/admin/creators/:id/review", async (c) => {
+    const denied = requireAdmin(c);
+    if (denied) return denied;
+    const body = await c.req
+      .json<{ reviewed?: boolean }>()
+      .catch(() => ({ reviewed: true }));
+    return c.json(
+      await service.reviewCreator(c.req.param("id") as CreatorId, body.reviewed !== false)
+    );
   });
 
   app.post("/api/admin/reset", async (c) => {

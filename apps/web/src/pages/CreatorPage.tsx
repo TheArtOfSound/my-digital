@@ -5,6 +5,7 @@ import { BecomeSeller } from "../components/BecomeSeller";
 import { CreatorListingsManager } from "../components/CreatorListingsManager";
 import { CreatorPayouts } from "../components/CreatorPayouts";
 import { CreatorProfileEditor } from "../components/CreatorProfileEditor";
+import { SellerVerification } from "../components/SellerVerification";
 import { VerifiedBadge } from "../components/VerifiedBadge";
 import type { SellerDashboard } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -116,6 +117,7 @@ export function CreatorPage() {
       {creator && (
         <>
           <CreatorPayouts creator={creator} />
+          <SellerVerification creator={creator} />
           <CreatorProfileEditor creator={creator} />
         </>
       )}

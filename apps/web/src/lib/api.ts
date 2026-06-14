@@ -249,5 +249,7 @@ export const api = {
       payoutsEnabled: boolean;
       detailsSubmitted: boolean;
     }>("/api/creator/payouts/refresh", postJson({})),
+  submitVerification: (input: { legalName: string; location: string; links?: string[] }) =>
+    requestJson<Creator>("/api/seller/verify", postJson(input)),
   reset: () => requestJson<{ ok: boolean }>("/api/admin/reset", { method: "POST" })
 };

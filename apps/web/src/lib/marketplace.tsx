@@ -136,6 +136,11 @@ interface MarketplaceActions {
     avatarUrl?: string;
     websiteUrl?: string;
   }): Promise<Creator>;
+  submitVerification(input: {
+    legalName: string;
+    location: string;
+    links?: string[];
+  }): Promise<Creator>;
   createLockedListing(input: CreateLockedListingInput): Promise<CreateLockedListingResult>;
   updateListing(input: {
     listingId: ListingId;
@@ -314,6 +319,12 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
       async updateCreatorProfile(input) {
         const creator = await api.updateCreator(input);
+        await refresh();
+        return creator;
+      },
+
+      async submitVerification(input) {
+        const creator = await api.submitVerification(input);
         await refresh();
         return creator;
       },

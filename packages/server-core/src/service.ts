@@ -28,6 +28,7 @@ import type {
   BuyerWrappingEnvelopeAdapter,
   CheckoutSession,
   Creator,
+  CreatorId,
   Fingerprint,
   LicenseId,
   LicenseTerms,
@@ -120,7 +121,27 @@ function publicCreatorCard(creator: Creator): Creator {
   if (creator.avatarUrl !== undefined) card.avatarUrl = creator.avatarUrl;
   if (creator.websiteUrl !== undefined) card.websiteUrl = creator.websiteUrl;
   if (creator.payoutsEnabled !== undefined) card.payoutsEnabled = creator.payoutsEnabled;
+  // Identity is shown publicly only once the seller is verified/reviewed — so an
+  // unverified seller's self-declared details never imply a check we didn't make.
+  if (creator.verificationStatus === "verified" || creator.verificationStatus === "reviewed") {
+    if (creator.legalName !== undefined) card.legalName = creator.legalName;
+    if (creator.location !== undefined) card.location = creator.location;
+    if (creator.verificationLinks !== undefined) card.verificationLinks = creator.verificationLinks;
+  }
   return card;
+}
+
+/**
+ * Recomputes the auto "verified" badge from objective signals: a seller is
+ * "verified" once they've supplied identity (legal name + location) AND their
+ * Stripe payouts are live. The manual "reviewed" tier is never auto-changed,
+ * and the badge is honestly removed if payouts lapse.
+ */
+function recomputeVerificationStatus(creator: Creator): Creator {
+  if (creator.verificationStatus === "reviewed") return creator;
+  const identityComplete = Boolean(creator.legalName && creator.location);
+  const next = identityComplete && creator.payoutsEnabled === true ? "verified" : "unverified";
+  return next === creator.verificationStatus ? creator : { ...creator, verificationStatus: next };
 }
 
 export interface ServerState {
@@ -705,13 +726,64 @@ export class MarketplaceService {
     const connect = this.connectAdapter();
     const status = await connect.getAccountStatus(creator.stripeAccountId);
     const payoutsEnabled = status.payoutsEnabled && status.chargesEnabled;
-    await store.updateCreator({ ...creator, payoutsEnabled });
+    // Connecting payouts can complete verification (or losing them remove it).
+    await store.updateCreator(recomputeVerificationStatus({ ...creator, payoutsEnabled }));
     return {
       stripeAccountId: creator.stripeAccountId,
       chargesEnabled: status.chargesEnabled,
       payoutsEnabled,
       detailsSubmitted: status.detailsSubmitted
     };
+  }
+
+  /**
+   * The signed-in seller submits identity details for the Verified badge. The
+   * badge is granted automatically once identity is complete and payouts are
+   * live (see {@link recomputeVerificationStatus}); this just stores the info.
+   */
+  async submitVerification(
+    input: { legalName: string; location: string; links?: string[] },
+    actingUserId?: UserId
+  ): Promise<Creator> {
+    const creator = await this.resolveActingCreator(actingUserId);
+    const legalName = input.legalName?.trim();
+    const location = input.location?.trim();
+    if (!legalName || legalName.length < 2 || legalName.length > 120) {
+      throw new Error("Enter your legal or business name (2–120 characters).");
+    }
+    if (!location || location.length < 2 || location.length > 120) {
+      throw new Error("Enter your location, e.g. city and country (2–120 characters).");
+    }
+    const links = (input.links ?? []).map((link) => link.trim()).filter(Boolean);
+    if (links.length > 6) throw new Error("Add at most 6 verification links.");
+    for (const link of links) {
+      if (link.length > 300 || !/^https?:\/\//i.test(link)) {
+        throw new Error("Each verification link must be a valid http(s) URL.");
+      }
+    }
+    const updated = recomputeVerificationStatus({
+      ...creator,
+      legalName,
+      location,
+      verificationLinks: links,
+      verificationSubmittedAt: new Date().toISOString()
+    });
+    await this.opts.store.updateCreator(updated);
+    return updated;
+  }
+
+  /**
+   * Platform-admin action: grant or revoke the manual "Reviewed by Imagine Qira"
+   * tier. Revoking re-derives the auto badge from current signals.
+   */
+  async reviewCreator(creatorId: CreatorId, reviewed: boolean): Promise<Creator> {
+    const creator = await this.opts.store.getCreator(creatorId);
+    if (!creator) throw new Error("Creator not found.");
+    const updated = reviewed
+      ? { ...creator, verificationStatus: "reviewed" as const }
+      : recomputeVerificationStatus({ ...creator, verificationStatus: "unverified" as const });
+    await this.opts.store.updateCreator(updated);
+    return updated;
   }
 
   async createLockedListing(
