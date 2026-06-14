@@ -1,0 +1,12 @@
+# My Digital — https://mydigital.imagineqira.com
+User-agent: *
+Allow: /
+# Utility / account / per-user routes carry no indexable content:
+Disallow: /api/
+Disallow: /checkout
+Disallow: /login
+Disallow: /signup
+Disallow: /library
+Disallow: /unlock
+
+Sitemap: https://mydigital.imagineqira.com/sitemap.xml

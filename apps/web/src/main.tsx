@@ -13,6 +13,7 @@ import {
 import { AuthProvider, useAuth } from "./lib/auth";
 import { isLivePayments } from "./lib/launch";
 import { MarketplaceProvider, useMarketplace } from "./lib/marketplace";
+import { RouteSeo } from "./lib/seo";
 import { AuthPage } from "./pages/AuthPage";
 import { CheckoutDonePage } from "./pages/CheckoutDonePage";
 import { CheckoutPage } from "./pages/CheckoutPage";
@@ -69,6 +70,7 @@ function Layout() {
 
   return (
     <div className="shell">
+      <RouteSeo />
       <nav className="nav">
         <Link className="brand" to="/" onClick={() => setMenuOpen(false)}>
           My Digital
