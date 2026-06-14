@@ -94,14 +94,9 @@ function Layout() {
           <div className="nav-links">
             <NavLink to="/sell">Sell</NavLink>
             <NavLink to="/library">Library</NavLink>
-            <NavLink to="/unlock">Unlock</NavLink>
             <NavLink to="/verify" end>
               Verify
             </NavLink>
-            <NavLink to="/trace">Trace</NavLink>
-            <NavLink to="/creator">Creator</NavLink>
-            <NavLink to="/funding">Funding</NavLink>
-            <NavLink to="/docs/qev">Docs</NavLink>
           </div>
           <div className="nav-right">
             <NavLink to="/status" className="pill pill-demo" style={{ textDecoration: "none" }}>
@@ -135,23 +130,26 @@ function Layout() {
       {status === "ready" && <Outlet />}
 
       <footer className="footer">
+        <div className="footer-links">
+          <Link to="/">Browse</Link>
+          <Link to="/sell">Sell</Link>
+          <Link to="/library">Library</Link>
+          <Link to="/verify">Verify</Link>
+          <Link to="/unlock">Unlock</Link>
+          <Link to="/trace">Trace</Link>
+          <Link to="/docs/qev">How it works</Link>
+          <Link to="/status">Status</Link>
+          <Link to="/funding">Back the launch</Link>
+        </div>
         <p className="footer-brand">My Digital — An Imagine Qira Company</p>
         <p>
-          Verified receipts for digital downloads. Buyer-specific licenses, local unlocks, and
-          public artifact verification, on QEV Vault V2 cryptography (schema BRY-NFET-SX-VAULT-V2,
-          Argon2id and XChaCha20-Poly1305). Unlock and decryption run locally; access keys and
-          decrypted files are never sent to the server after purchase.
-        </p>
-        <p>
+          Products are sealed with QEV Vault V2 encryption; unlocking and decryption happen in your
+          browser, and payouts go directly to sellers.{" "}
           {live
-            ? "Payments are processed by Stripe on its hosted checkout; card details never touch this site. "
-            : "Preview build: payments are simulated and no charges occur. "}
-          My Digital does not make copying impossible after unlock — it provides license records,
-          receipts, integrity, and traceability.
-        </p>
-        <p>
-          <Link to="/status">Status</Link> · <Link to="/docs/qev">Trust docs</Link> ·{" "}
-          <Link to="/verify">Verifier</Link> · <Link to="/funding">Back the launch</Link>
+            ? "Payments are processed by Stripe; card details never touch this site. "
+            : "Preview build: payments are simulated. "}
+          My Digital doesn't make copying impossible — it makes purchases verifiable.{" "}
+          <Link to="/docs/qev">Read the details</Link>.
         </p>
       </footer>
     </div>

@@ -1,60 +1,42 @@
 import { Link } from "react-router-dom";
-import { ClaimBoundary } from "../components/ClaimBoundary";
-import { BUYER_FLOW, FlowStepper } from "../components/FlowStepper";
-import { ProofPreview } from "../components/ProofPreview";
 import { formatPrice } from "../lib/format";
-import { COMPARISON_ROWS, COPY, LAUNCH_DATE, LAUNCH_NICHES, isLivePayments } from "../lib/launch";
+import { isLivePayments } from "../lib/launch";
 import { useMarketplace } from "../lib/marketplace";
 
 export function HomePage() {
   const { state, paymentsProvider } = useMarketplace();
   const live = isLivePayments(paymentsProvider);
+  const hasListings = state.listings.length > 0;
 
   return (
     <>
       <section className="hero">
-        <p className="eyebrow">Imagine Qira · Verified digital commerce</p>
-        <h1>{COPY.heroHeadline}</h1>
-        <p className="subhead">{COPY.heroSubcopy}</p>
+        <h1>Sell digital products. Get paid directly.</h1>
+        <p className="subhead">
+          Upload a file, set a price, and start selling. Buyers download instantly and get a receipt
+          that proves the purchase — and your earnings go straight to your own Stripe account, not
+          ours.
+        </p>
         <div className="hero-actions">
           <Link className="btn btn-primary" to="/sell">
-            Sell a digital product
+            Start selling
           </Link>
-          <Link className="btn btn-ghost" to="/verify">
-            Try the verifier demo
-          </Link>
-          <Link className="btn btn-ghost" to="/funding">
-            Back the launch
-          </Link>
-        </div>
-        <div className="notice">
-          {COPY.positioning}{" "}
-          {live
-            ? "Payments are processed by Stripe on its secure hosted checkout."
-            : "Preview build: payments are simulated and no charges occur — see the status page."}
+          <a className="btn btn-ghost" href="#products">
+            Browse products
+          </a>
         </div>
       </section>
 
-      <ProofPreview heading="What a buyer receives — before they pay" />
-
-      <section className="panel">
-        <h2>How a sale works for a buyer</h2>
-        <FlowStepper steps={BUYER_FLOW} />
-        <p style={{ marginTop: "14px" }}>
-          Unlocking is just your access step — not a cryptography exam. The full creator-to-trace
-          lifecycle (Create, Lock, List, Buy, License, Unlock, Verify, Trace) is explained in the{" "}
-          <Link to="/docs/qev">trust docs</Link>.
-        </p>
-      </section>
-
-      <section className="panel">
-        <h2>Listings ({state.listings.length})</h2>
-        {state.listings.length === 0 ? (
-          <p>
-            Nothing is listed yet. <Link to="/sell">Lock and list the first product</Link> to run
-            the lifecycle end to end.
-          </p>
-        ) : (
+      <section className="panel" id="products">
+        <div className="section-head">
+          <h2>{hasListings ? "Browse products" : "Products"}</h2>
+          {hasListings && (
+            <Link to="/sell" className="section-link">
+              Sell yours →
+            </Link>
+          )}
+        </div>
+        {hasListings ? (
           <div className="listing-grid">
             {state.listings.map((listing) => (
               <Link className="listing-card" key={listing.id} to={`/listing/${listing.id}`}>
@@ -66,75 +48,53 @@ export function HomePage() {
               </Link>
             ))}
           </div>
+        ) : (
+          <p>
+            Nothing for sale just yet. <Link to="/sell">List the first product</Link> — it takes a
+            couple of minutes.
+          </p>
         )}
-        <p className="hint" style={{ marginTop: "12px" }}>
-          First launch wedge: {LAUNCH_NICHES.join(", ")} — proof-sensitive digital goods, not every
-          file type.
-        </p>
       </section>
 
       <section className="panel">
-        <h2>Why not just a download link?</h2>
-        <p style={{ marginBottom: "16px" }}>
-          Gumroad, Shopify digital downloads, and Drive/Dropbox links all deliver a file. My Digital
-          adds a verifiable receipt, a buyer-specific license, and a public verifier on top — it is a
-          proof layer, not a generic store clone.
-        </p>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Capability</th>
-              <th>Download link / store</th>
-              <th>My Digital</th>
-            </tr>
-          </thead>
-          <tbody>
-            {COMPARISON_ROWS.map((row) => (
-              <tr key={row.capability}>
-                <td>{row.capability}</td>
-                <td>{row.others}</td>
-                <td>{row.mydigital}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="grid">
-        <article className="card">
-          <h3>For creators</h3>
-          <p>
-            {COPY.creatorBoundary} Custody secrets are sealed server-side; leaked copies trace back
-            to the license they were issued under.
-          </p>
-        </article>
-        <article className="card">
-          <h3>For buyers</h3>
-          <p>
-            You receive your own license record, a receipt that verifies publicly, and an access key
-            shown once. Decryption runs locally — your key and your files never touch our servers.
-          </p>
-        </article>
-        <article className="card">
-          <h3>For verification</h3>
-          <p>
-            The <Link to="/verify">verifier</Link> is the trust center: it states what was checked,
-            what passed, what was not checked, and what is assumed — online or offline, before you
-            buy.
-          </p>
-        </article>
+        <h2>How it works</h2>
+        <div className="how-grid">
+          <div className="how-step">
+            <span className="how-num">1</span>
+            <h3>Upload &amp; price it</h3>
+            <p>
+              Add your file, write a short description, set a price. Your product is sealed so only
+              paying buyers can open it.
+            </p>
+          </div>
+          <div className="how-step">
+            <span className="how-num">2</span>
+            <h3>Buyers pay you directly</h3>
+            <p>
+              Checkout runs on Stripe and the money lands in your own account. My Digital never holds
+              your earnings.
+            </p>
+          </div>
+          <div className="how-step">
+            <span className="how-num">3</span>
+            <h3>Proof + a secure download</h3>
+            <p>
+              Every sale issues a buyer-specific download and a receipt anyone can verify — so a
+              purchase is provable, not just a file in an inbox.
+            </p>
+          </div>
+        </div>
       </section>
 
       <section className="panel muted">
-        <h2>What we claim, plainly</h2>
-        <p style={{ marginBottom: "16px" }}>
-          This platform improves controlled access, proof of purchase, license verification, and leak
-          traceability. It does not claim to make piracy impossible, and it never will.
+        <p style={{ margin: 0 }}>
+          Built on real cryptography (QEV Vault V2), so every purchase is independently verifiable.
+          We don't claim it makes copying impossible — we make ownership <em>provable</em>.{" "}
+          <Link to="/docs/qev">See how it works →</Link>
         </p>
-        <ClaimBoundary variant="product" />
-        <p className="hint" style={{ marginTop: "14px" }}>
-          Launch target {LAUNCH_DATE}. See exactly what is live versus simulated on the{" "}
-          <Link to="/status">status page</Link>.
+        <p className="hint" style={{ marginTop: "10px", marginBottom: 0 }}>
+          {live ? "Payments run live on Stripe. " : "Preview build — payments are simulated. "}
+          <Link to="/verify">Try the verifier</Link> · <Link to="/status">What's live</Link>
         </p>
       </section>
     </>
