@@ -1,4 +1,5 @@
 import type { Creator } from "@my-digital/types";
+import { VerifiedBadge } from "./VerifiedBadge";
 
 /** Public "sold by" creator identity shown on listings and the home page. */
 export function CreatorBadge({ creator }: { creator: Creator }) {
@@ -12,6 +13,7 @@ export function CreatorBadge({ creator }: { creator: Creator }) {
       <div className="creator-badge-body">
         <span className="creator-badge-name">
           {creator.displayName} <span className="creator-badge-handle">@{creator.handle}</span>
+          <VerifiedBadge creator={creator} />
         </span>
         {creator.bio && <span className="creator-badge-bio">{creator.bio}</span>}
         {creator.websiteUrl && (

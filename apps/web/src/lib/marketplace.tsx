@@ -37,8 +37,10 @@ import {
 import {
   api,
   setApiAdminToken,
+  type AccountLibrary,
   type BuyerLibrary,
   type ReceiptBundle,
+  type SellerDashboard,
   type ServerCheckoutOutcome,
   type ServerState
 } from "./api";
@@ -55,6 +57,7 @@ async function loadQevAdapter() {
 function emptyServerState(): ServerState {
   return {
     issuer: { name: "", publicKeyB64: "" },
+    creators: [],
     creator: null,
     buyers: [],
     assets: [],
@@ -120,7 +123,12 @@ export interface LockedAssetVerification {
 
 interface MarketplaceActions {
   refresh(): Promise<void>;
-  ensureCreator(input: { displayName: string; handle: string; email: string }): Promise<Creator>;
+  /** Turns the signed-in account into a seller (idempotent). */
+  becomeSeller(input?: { displayName?: string; handle?: string }): Promise<Creator>;
+  /** Loads the signed-in seller's private console (their listings + sales). */
+  loadSellerDashboard(): Promise<SellerDashboard | null>;
+  /** Loads the signed-in buyer's library by account. */
+  loadMyLibrary(): Promise<AccountLibrary>;
   updateCreatorProfile(input: {
     displayName?: string;
     handle?: string;
@@ -290,10 +298,18 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
     return {
       refresh,
 
-      async ensureCreator(input) {
-        const creator = await api.ensureCreator(input);
+      async becomeSeller(input) {
+        const creator = await api.becomeSeller(input);
         await refresh();
         return creator;
+      },
+
+      async loadSellerDashboard() {
+        return api.getSellerDashboard();
+      },
+
+      async loadMyLibrary() {
+        return api.getMyLibrary();
       },
 
       async updateCreatorProfile(input) {

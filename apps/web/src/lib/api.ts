@@ -24,6 +24,9 @@ import type {
 /** Wire shape of GET /api/state. */
 export interface ServerState {
   issuer: { name: string; publicKeyB64: string };
+  /** Public cards for every seller with a visible listing (multi-seller). */
+  creators: Creator[];
+  /** First seller, kept for backward compatibility; prefer `creators`. */
   creator: Creator | null;
   buyers: Buyer[];
   assets: Asset[];
@@ -40,6 +43,26 @@ export interface ServerState {
 
 export interface BuyerLibrary {
   buyer: Buyer;
+  purchases: Purchase[];
+  licenses: BuyerLicense[];
+  receipts: ProofReceipt[];
+}
+
+/** Account-based library (signed-in buyer); buyer is null if they've bought nothing. */
+export interface AccountLibrary {
+  buyer: Buyer | null;
+  purchases: Purchase[];
+  licenses: BuyerLicense[];
+  receipts: ProofReceipt[];
+}
+
+/** A seller's own console view. */
+export interface SellerDashboard {
+  creator: Creator;
+  listings: Listing[];
+  assets: Asset[];
+  assetVersions: AssetVersion[];
+  lockedAssets: LockedAsset[];
   purchases: Purchase[];
   licenses: BuyerLicense[];
   receipts: ProofReceipt[];
@@ -148,8 +171,10 @@ export const api = {
     requestJson<{ user: PublicUser }>("/api/auth/login", postJson(input)),
   authLogout: () => requestJson<{ ok: boolean }>("/api/auth/logout", postJson({})),
   getState: () => requestJson<ServerState>("/api/state"),
-  ensureCreator: (input: { displayName: string; handle: string; email: string }) =>
-    requestJson<Creator>("/api/creator", postJson(input)),
+  becomeSeller: (input?: { displayName?: string; handle?: string }) =>
+    requestJson<Creator>("/api/seller", postJson(input ?? {})),
+  getSellerDashboard: () => requestJson<SellerDashboard | null>("/api/seller/dashboard"),
+  getMyLibrary: () => requestJson<AccountLibrary>("/api/library/me"),
   updateCreator: (input: {
     displayName?: string;
     handle?: string;

@@ -2,8 +2,9 @@ import { demoPersonalLicenseTerms, utf8Bytes } from "@my-digital/core";
 import type { LicenseTerms } from "@my-digital/types";
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { CreatorSetup } from "../components/CreatorSetup";
+import { BecomeSeller } from "../components/BecomeSeller";
 import { shortHash } from "../lib/format";
+import { useAuth } from "../lib/auth";
 import { useMarketplace, type CreateLockedListingResult } from "../lib/marketplace";
 
 const CATEGORIES = [
@@ -30,7 +31,8 @@ const SAMPLE_CONTENT =
   "My Digital demo product.\n\nPrompt 1: Summarize a contract into plain language.\nPrompt 2: Draft a release note from a changelog.\nPrompt 3: Turn meeting notes into action items.\n";
 
 export function SellPage() {
-  const { state, actions } = useMarketplace();
+  const { actions } = useMarketplace();
+  const { isSeller } = useAuth();
   const [title, setTitle] = useState("Demo Prompt Pack");
   const [description, setDescription] = useState("Ten working prompts for everyday tasks.");
   const [category, setCategory] = useState(CATEGORIES[0] ?? "other");
@@ -42,14 +44,14 @@ export function SellPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<CreateLockedListingResult | null>(null);
 
-  if (!state.creator) {
+  if (!isSeller) {
     return (
       <>
         <section className="panel">
           <h2>Sell a locked digital product</h2>
-          <p>The lifecycle starts with a creator identity.</p>
+          <p>Open your seller account to lock a file into a QEV asset and list it for sale.</p>
         </section>
-        <CreatorSetup />
+        <BecomeSeller />
       </>
     );
   }

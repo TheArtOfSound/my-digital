@@ -1,15 +1,34 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { downloadBytes, downloadJson, formatDate, formatPrice, shortId } from "../lib/format";
-import type { BuyerLibrary } from "../lib/api";
+import type { AccountLibrary, BuyerLibrary } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useMarketplace } from "../lib/marketplace";
 
 export function LibraryPage() {
   const { state, actions } = useMarketplace();
+  const { user } = useAuth();
   const [email, setEmail] = useState("buyer@example.com");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [library, setLibrary] = useState<BuyerLibrary | null>(null);
+  const [library, setLibrary] = useState<BuyerLibrary | AccountLibrary | null>(null);
+
+  // Signed-in buyers see their account library automatically (no email needed).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    void actions
+      .loadMyLibrary()
+      .then((lib) => {
+        if (!cancelled) setLibrary(lib);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, actions]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -28,11 +47,11 @@ export function LibraryPage() {
   return (
     <>
       <section className="panel">
-        <h2>Buyer library</h2>
+        <h2>Your library</h2>
         <p>
-          Look up your purchases by email. The email is hashed in this browser — only the hash is
-          sent. This lookup is a dev convenience, not authentication; real buyer accounts arrive
-          with production auth.
+          {user
+            ? "These are the purchases tied to your account. You can also look up a purchase made as a guest with a different email below."
+            : "Sign in to see your purchases automatically. Or look one up by the email used at checkout — it's hashed in this browser, so only the hash is sent."}
         </p>
         <form className="form" onSubmit={onSubmit}>
           <label className="field">

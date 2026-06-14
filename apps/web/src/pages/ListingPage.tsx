@@ -10,9 +10,6 @@ export function ListingPage() {
   const { listingId } = useParams<{ listingId: string }>();
   const { state, paymentsProvider, connectEnabled } = useMarketplace();
   const stripeLive = paymentsProvider === "stripe";
-  // In direct-payout mode the creator must have connected payouts before buyers
-  // can purchase (so funds always reach the creator, never the platform).
-  const payoutReady = !connectEnabled || state.creator?.payoutsEnabled === true;
 
   const listing = state.listings.find((entry) => entry.id === listingId);
   if (!listing) {
@@ -26,6 +23,12 @@ export function ListingPage() {
       </section>
     );
   }
+  // Resolve THIS listing's seller (multi-seller); fall back to the first seller.
+  const seller =
+    state.creators.find((entry) => entry.id === listing.creatorId) ?? state.creator ?? null;
+  // In direct-payout mode the seller must have connected payouts before buyers
+  // can purchase (so funds always reach the seller, never the platform).
+  const payoutReady = !connectEnabled || seller?.payoutsEnabled === true;
   const assetVersion = state.assetVersions.find(
     (entry) => entry.id === listing.activeAssetVersionId
   );
@@ -71,10 +74,10 @@ export function ListingPage() {
         </div>
       </section>
 
-      {state.creator && (
+      {seller && (
         <section className="panel">
           <h2>Sold by</h2>
-          <CreatorBadge creator={state.creator} />
+          <CreatorBadge creator={seller} />
         </section>
       )}
 

@@ -8,7 +8,7 @@ import { useMarketplace } from "../lib/marketplace";
  * holds the funds). Onboarding happens on Stripe's hosted pages.
  */
 export function CreatorPayouts({ creator }: { creator: Creator }) {
-  const { connectEnabled, hasAdminToken, actions } = useMarketplace();
+  const { connectEnabled, actions } = useMarketplace();
   const [busy, setBusy] = useState<null | "onboard" | "refresh">(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,16 +80,11 @@ export function CreatorPayouts({ creator }: { creator: Creator }) {
           </dd>
         </div>
       </dl>
-      {!hasAdminToken && (
-        <div className="notice">
-          Enable management access above to connect or refresh payouts.
-        </div>
-      )}
       <div className="hero-actions">
         <button
           className="btn btn-primary"
           type="button"
-          disabled={busy !== null || !hasAdminToken}
+          disabled={busy !== null}
           onClick={() => void connect()}
         >
           {busy === "onboard"
@@ -101,7 +96,7 @@ export function CreatorPayouts({ creator }: { creator: Creator }) {
         <button
           className="btn btn-ghost"
           type="button"
-          disabled={busy !== null || !hasAdminToken || !creator.stripeAccountId}
+          disabled={busy !== null || !creator.stripeAccountId}
           onClick={() => void refresh()}
         >
           {busy === "refresh" ? "Checking…" : "Refresh status"}

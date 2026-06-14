@@ -17,8 +17,8 @@ function statusPillClass(status: Listing["status"]): string {
   return "pill pill-warning";
 }
 
-export function CreatorListingsManager() {
-  const { state, actions } = useMarketplace();
+export function CreatorListingsManager({ listings }: { listings: Listing[] }) {
+  const { actions } = useMarketplace();
   const [editingId, setEditingId] = useState<ListingId | null>(null);
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -67,7 +67,7 @@ export function CreatorListingsManager() {
     });
   }
 
-  if (state.listings.length === 0) {
+  if (listings.length === 0) {
     return (
       <section className="panel">
         <h2>Your listings (0)</h2>
@@ -80,11 +80,11 @@ export function CreatorListingsManager() {
 
   return (
     <section className="panel">
-      <h2>Your listings ({state.listings.length})</h2>
+      <h2>Your listings ({listings.length})</h2>
       <p>Edit details, change status (pause or unlist), or delete unsold listings.</p>
       {error && <p className="panel-error">{error}</p>}
       <div className="listing-manager">
-        {state.listings.map((listing) => {
+        {listings.map((listing) => {
           const editing = editingId === listing.id;
           const busy = busyId === listing.id;
           return (

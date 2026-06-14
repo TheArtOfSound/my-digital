@@ -1,23 +1,40 @@
 import type { LicenseId } from "@my-digital/types";
-import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { BecomeSeller } from "../components/BecomeSeller";
 import { CreatorListingsManager } from "../components/CreatorListingsManager";
 import { CreatorPayouts } from "../components/CreatorPayouts";
 import { CreatorProfileEditor } from "../components/CreatorProfileEditor";
-import { CreatorSetup } from "../components/CreatorSetup";
-import { copyToClipboard, downloadJson, formatDate, formatPrice, shortHash, shortId } from "../lib/format";
+import { VerifiedBadge } from "../components/VerifiedBadge";
+import type { SellerDashboard } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { downloadJson, formatDate, formatPrice, shortId } from "../lib/format";
 import { useMarketplace } from "../lib/marketplace";
 
 export function CreatorPage() {
-  const { state, actions, hasAdminToken } = useMarketplace();
+  const { actions, state } = useMarketplace();
+  const { user, isSeller, status: authStatus } = useAuth();
+  const [dashboard, setDashboard] = useState<SellerDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copiedKey, setCopiedKey] = useState(false);
-  const [tokenInput, setTokenInput] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
   const [payoutNotice, setPayoutNotice] = useState<string | null>(null);
 
+  const loadDashboard = useCallback(async () => {
+    try {
+      setDashboard(await actions.loadSellerDashboard());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [actions]);
+
+  // Reload the dashboard on mount and whenever marketplace state changes (every
+  // mutation calls refresh(), so edits/sales show up without a manual reload).
+  useEffect(() => {
+    if (isSeller) void loadDashboard();
+  }, [isSeller, state, loadDashboard]);
+
   // When Stripe redirects back from onboarding (?payouts=return|refresh),
-  // re-check status automatically so the creator isn't left on a stale panel.
+  // re-check status automatically so the seller isn't left on a stale panel.
   useEffect(() => {
     const flow = searchParams.get("payouts");
     if (flow !== "return" && flow !== "refresh") return;
@@ -27,9 +44,9 @@ export function CreatorPage() {
     setPayoutNotice("Checking your payout status with Stripe…");
     void actions
       .refreshPayoutStatus()
-      .then((status) =>
+      .then((s) =>
         setPayoutNotice(
-          status.payoutsEnabled
+          s.payoutsEnabled
             ? "Payouts connected — buyers now pay you directly."
             : "Stripe onboarding isn't finished yet. Use “Continue payout setup” below to complete it."
         )
@@ -37,18 +54,32 @@ export function CreatorPage() {
       .catch((cause) => setPayoutNotice(cause instanceof Error ? cause.message : String(cause)));
   }, [searchParams, setSearchParams, actions]);
 
-  if (!state.creator) {
+  if (authStatus === "loading") {
+    return (
+      <section className="panel">
+        <p>Loading your account…</p>
+      </section>
+    );
+  }
+
+  // Logged out, or logged in without a seller profile yet.
+  if (!isSeller) {
     return (
       <>
-        <section className="panel">
-          <h2>Creator dashboard</h2>
-          <p>No creator profile exists in this browser yet.</p>
+        <section className="hero hero-compact">
+          <p className="eyebrow">Seller dashboard</p>
+          <h1 className="listing-title">Sell digital products that come with proof</h1>
+          <p className="subhead">
+            List locked products, issue verifiable licenses and receipts, and get paid directly to
+            your own Stripe account.
+          </p>
         </section>
-        <CreatorSetup />
+        <BecomeSeller />
       </>
     );
   }
-  const creator = state.creator;
+
+  const creator = dashboard?.creator;
 
   async function revoke(licenseId: LicenseId) {
     if (!window.confirm("Revoke this license? Unlock and verification will fail afterwards.")) {
@@ -56,7 +87,7 @@ export function CreatorPage() {
     }
     setError(null);
     try {
-      await actions.revokeLicense(licenseId, "Revoked by creator from the demo dashboard.");
+      await actions.revokeLicense(licenseId, "Revoked by the seller from the dashboard.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -69,105 +100,32 @@ export function CreatorPage() {
           <div className="notice">{payoutNotice}</div>
         </section>
       )}
-      <section className="panel">
-        <h2>Creator dashboard</h2>
-        <dl className="kv">
-          <div>
-            <dt>Creator</dt>
-            <dd>
-              {creator.displayName} (@{creator.handle}) · <span className="mono">{creator.id}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>Email hash</dt>
-            <dd className="mono">{shortHash(creator.emailHash, 32)}</dd>
-          </div>
-          <div>
-            <dt>Issuer</dt>
-            <dd>
-              {state.issuer ? (
-                <>
-                  {state.issuer.name} · key <span className="mono">{shortHash(state.issuer.publicKeyB64, 24)}</span>{" "}
-                  <button
-                    className="btn btn-ghost btn-small"
-                    type="button"
-                    onClick={() => {
-                      if (state.issuer) {
-                        void copyToClipboard(state.issuer.publicKeyB64).then(setCopiedKey);
-                      }
-                    }}
-                  >
-                    {copiedKey ? "Copied" : "Copy public key"}
-                  </button>
-                </>
-              ) : (
-                "not initialized"
-              )}
-            </dd>
-          </div>
-        </dl>
-        <div className="notice">
-          The issuer's Ed25519 private key lives on the API server, sealed under the server master
-          key — it is never stored in plaintext and never sent to this browser. Custody secrets for
-          locked assets are sealed the same way.
-        </div>
+
+      <section className="hero hero-compact">
+        <p className="eyebrow">Seller dashboard</p>
+        <h1 className="listing-title">
+          {creator?.displayName ?? user?.displayName}
+          {creator && <VerifiedBadge creator={creator} />}
+        </h1>
+        <p className="subhead">
+          {creator ? <>@{creator.handle}</> : "Loading…"} · Signed in as {user?.email}
+        </p>
         {error && <p className="panel-error">{error}</p>}
       </section>
 
-      <section className="panel">
-        <h2>Management access</h2>
-        <p>
-          Editing your profile, managing listings, and connecting payouts require the management
-          token (the server&rsquo;s admin token). It is stored only in this browser and sent as a
-          bearer header on management requests. Buyers never need it.
-        </p>
-        {hasAdminToken ? (
-          <div className="hero-actions">
-            <span className="pill pill-pass">MANAGEMENT ENABLED</span>
-            <button
-              className="btn btn-ghost btn-small"
-              type="button"
-              onClick={() => actions.setAdminToken(undefined)}
-            >
-              Clear token
-            </button>
-          </div>
-        ) : (
-          <form
-            className="form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              actions.setAdminToken(tokenInput);
-              setTokenInput("");
-            }}
-          >
-            <label className="field">
-              Management token
-              <input
-                type="password"
-                value={tokenInput}
-                onChange={(event) => setTokenInput(event.target.value)}
-                placeholder="paste the admin token"
-                autoComplete="off"
-              />
-            </label>
-            <button className="btn btn-primary" type="submit" disabled={tokenInput.trim().length === 0}>
-              Enable management
-            </button>
-          </form>
-        )}
-      </section>
+      {creator && (
+        <>
+          <CreatorPayouts creator={creator} />
+          <CreatorProfileEditor creator={creator} />
+        </>
+      )}
 
-      <CreatorPayouts creator={creator} />
-
-      <CreatorProfileEditor creator={creator} />
-
-      <CreatorListingsManager />
+      <CreatorListingsManager listings={dashboard?.listings ?? []} />
 
       <section className="panel">
-        <h2>Purchases ({state.purchases.length})</h2>
-        {state.purchases.length === 0 ? (
-          <p>No purchases yet.</p>
+        <h2>Sales ({dashboard?.purchases.length ?? 0})</h2>
+        {!dashboard || dashboard.purchases.length === 0 ? (
+          <p>No sales yet. When a buyer purchases one of your listings it appears here.</p>
         ) : (
           <table className="table">
             <thead>
@@ -179,7 +137,7 @@ export function CreatorPage() {
               </tr>
             </thead>
             <tbody>
-              {state.purchases.map((purchase) => (
+              {dashboard.purchases.map((purchase) => (
                 <tr key={purchase.id}>
                   <td className="mono">{shortId(purchase.id, 26)}</td>
                   <td>{formatPrice(purchase.amountPaid, purchase.currency)}</td>
@@ -195,8 +153,8 @@ export function CreatorPage() {
       </section>
 
       <section className="panel">
-        <h2>Licenses ({state.licenses.length})</h2>
-        {state.licenses.length === 0 ? (
+        <h2>Licenses issued ({dashboard?.licenses.length ?? 0})</h2>
+        {!dashboard || dashboard.licenses.length === 0 ? (
           <p>No licenses issued yet.</p>
         ) : (
           <table className="table">
@@ -209,8 +167,8 @@ export function CreatorPage() {
               </tr>
             </thead>
             <tbody>
-              {state.licenses.map((license) => {
-                const asset = state.assets.find((entry) => entry.id === license.assetId);
+              {dashboard.licenses.map((license) => {
+                const asset = dashboard.assets.find((entry) => entry.id === license.assetId);
                 const revoked = license.revokedAt !== undefined;
                 return (
                   <tr key={license.id}>
@@ -242,11 +200,9 @@ export function CreatorPage() {
         )}
       </section>
 
-      <section className="panel">
-        <h2>Receipts ({state.receipts.length})</h2>
-        {state.receipts.length === 0 ? (
-          <p>No receipts yet.</p>
-        ) : (
+      {dashboard && dashboard.receipts.length > 0 && (
+        <section className="panel">
+          <h2>Receipts ({dashboard.receipts.length})</h2>
           <table className="table">
             <thead>
               <tr>
@@ -256,7 +212,7 @@ export function CreatorPage() {
               </tr>
             </thead>
             <tbody>
-              {state.receipts.map((receipt) => (
+              {dashboard.receipts.map((receipt) => (
                 <tr key={receipt.id}>
                   <td className="mono">{shortId(receipt.id, 26)}</td>
                   <td>{formatDate(receipt.createdAt)}</td>
@@ -280,56 +236,8 @@ export function CreatorPage() {
               ))}
             </tbody>
           </table>
-        )}
-      </section>
-
-      {state.revocations.length > 0 && (
-        <section className="panel">
-          <h2>Revocations ({state.revocations.length})</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Target</th>
-                <th>Reason</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.revocations.map((revocation) => (
-                <tr key={revocation.id}>
-                  <td className="mono">{shortId(revocation.targetId, 26)}</td>
-                  <td>{revocation.reason}</td>
-                  <td>{formatDate(revocation.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </section>
       )}
-
-      <section className="panel danger-zone">
-        <h2>Danger zone</h2>
-        <p>
-          Deletes every record in the server database and bootstraps a fresh issuer key. Existing
-          receipts and licenses will no longer verify against the new issuer.
-        </p>
-        <button
-          className="btn btn-danger"
-          type="button"
-          onClick={() => {
-            if (window.confirm("Delete all marketplace data on the server?")) {
-              setError(null);
-              void actions
-                .resetDemo()
-                .catch((cause) =>
-                  setError(cause instanceof Error ? cause.message : String(cause))
-                );
-            }
-          }}
-        >
-          Reset marketplace data
-        </button>
-      </section>
     </>
   );
 }
