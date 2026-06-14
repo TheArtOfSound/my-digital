@@ -97,6 +97,27 @@ a:hover {
   margin-bottom: 32px;
 }
 
+/* On desktop the collapse is transparent: its children act as direct flex
+   children of .nav (current layout). On mobile it becomes a dropdown. */
+.nav-collapse {
+  display: contents;
+}
+
+.nav-toggle {
+  display: none;
+  background: none;
+  border: 1px solid var(--line);
+  padding: 7px 13px;
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 .brand {
   font-weight: 800;
   font-size: 1.05rem;
@@ -1098,6 +1119,102 @@ input[type="file"] {
   font-size: 0.82rem;
 }
 
+/* Docs page: sticky table of contents + collapsible deep dive ---------------- */
+
+.docs-layout {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+.docs-toc {
+  position: sticky;
+  top: 20px;
+  border: 1px solid var(--line);
+  padding: 16px 18px;
+  background: var(--paper);
+}
+
+.docs-toc-title {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 12px;
+}
+
+.docs-toc nav {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.docs-toc nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.9rem;
+  border-left: 2px solid transparent;
+  padding-left: 10px;
+}
+
+.docs-toc nav a:hover {
+  color: var(--ink);
+  border-left-color: var(--ink);
+}
+
+.docs-toc-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.docs-content > section {
+  scroll-margin-top: 18px;
+}
+
+.deep-detail {
+  border: 1px solid var(--line);
+  margin-top: 10px;
+}
+
+.deep-detail > summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  list-style: none;
+}
+
+.deep-detail > summary::-webkit-details-marker {
+  display: none;
+}
+
+.deep-detail > summary::before {
+  content: "+ ";
+  color: var(--ink-faint);
+}
+
+.deep-detail[open] > summary::before {
+  content: "– ";
+}
+
+.deep-detail[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.deep-detail-body {
+  padding: 12px 14px;
+}
+
+.deep-detail-body p {
+  margin-bottom: 8px;
+}
+
 /* Responsive ----------------------------------------------------------------- */
 
 @media (max-width: 780px) {
@@ -1105,9 +1222,55 @@ input[type="file"] {
     width: calc(100% - 32px);
   }
 
+  .docs-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .docs-toc {
+    position: static;
+  }
+
   .nav {
     flex-wrap: wrap;
+    align-items: center;
     gap: 12px;
+  }
+
+  .nav-toggle {
+    display: inline-block;
+  }
+
+  .nav-collapse {
+    display: none;
+    flex-basis: 100%;
+    width: 100%;
+  }
+
+  .nav-collapse[data-open="true"] {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 18px;
+    padding-top: 6px;
+  }
+
+  .nav-links {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    flex: none;
+    width: 100%;
+  }
+
+  .nav-links a {
+    font-size: 0.95rem;
+  }
+
+  .nav-right {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    width: 100%;
   }
 
   .grid {

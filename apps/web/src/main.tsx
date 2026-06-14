@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
@@ -65,31 +65,50 @@ function AccountMenu() {
 function Layout() {
   const { status, unsupportedReason, paymentsProvider } = useMarketplace();
   const live = isLivePayments(paymentsProvider);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div className="shell">
       <nav className="nav">
-        <Link className="brand" to="/">
+        <Link className="brand" to="/" onClick={() => setMenuOpen(false)}>
           My Digital
           <small>An Imagine Qira Company</small>
         </Link>
-        <div className="nav-links">
-          <NavLink to="/sell">Sell</NavLink>
-          <NavLink to="/library">Library</NavLink>
-          <NavLink to="/unlock">Unlock</NavLink>
-          <NavLink to="/verify" end>
-            Verify
-          </NavLink>
-          <NavLink to="/trace">Trace</NavLink>
-          <NavLink to="/creator">Creator</NavLink>
-          <NavLink to="/funding">Funding</NavLink>
-          <NavLink to="/docs/qev">Docs</NavLink>
-        </div>
-        <div className="nav-right">
-          <NavLink to="/status" className="pill pill-demo" style={{ textDecoration: "none" }}>
-            {live ? "Payments by Stripe" : "Preview — Mock Payments"}
-          </NavLink>
-          <AccountMenu />
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-expanded={menuOpen}
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? "Close" : "Menu"}
+        </button>
+        {/* Collapses to a dropdown on mobile; closes on any link/button tap. */}
+        <div
+          className="nav-collapse"
+          data-open={menuOpen}
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest("a,button")) setMenuOpen(false);
+          }}
+        >
+          <div className="nav-links">
+            <NavLink to="/sell">Sell</NavLink>
+            <NavLink to="/library">Library</NavLink>
+            <NavLink to="/unlock">Unlock</NavLink>
+            <NavLink to="/verify" end>
+              Verify
+            </NavLink>
+            <NavLink to="/trace">Trace</NavLink>
+            <NavLink to="/creator">Creator</NavLink>
+            <NavLink to="/funding">Funding</NavLink>
+            <NavLink to="/docs/qev">Docs</NavLink>
+          </div>
+          <div className="nav-right">
+            <NavLink to="/status" className="pill pill-demo" style={{ textDecoration: "none" }}>
+              {live ? "Payments by Stripe" : "Preview — Mock Payments"}
+            </NavLink>
+            <AccountMenu />
+          </div>
         </div>
       </nav>
 
