@@ -234,20 +234,31 @@ export class MarketplaceService {
   async getState(options?: { includePrivate?: boolean }): Promise<ServerState> {
     const { store } = this.opts;
     const includePrivate = options?.includePrivate === true;
-    const creator = (await store.listCreators())[0] ?? null;
+    const allCreators = await store.listCreators();
+    const creator = allCreators[0] ?? null;
+
+    // When direct payouts are available, a signed-up seller's listings are
+    // public only once they've connected payouts — so buyers never reach an
+    // item that can't be paid for. The platform's own legacy listings (no owner
+    // account) are always shown.
+    const enforcePayouts = !includePrivate && this.connectEnabled();
+    const creatorById = new Map(allCreators.map((entry) => [entry.id, entry]));
+    const sellable = (listing: Listing): boolean => {
+      if (!enforcePayouts) return true;
+      const owner = creatorById.get(listing.creatorId);
+      return !owner || owner.userId === undefined || owner.payoutsEnabled === true;
+    };
 
     const allListings = await store.listListings();
     const listings = includePrivate
       ? allListings
-      : allListings.filter((listing) => listing.status === "active");
+      : allListings.filter((listing) => listing.status === "active" && sellable(listing));
 
     const assets = await store.listAssets();
     const assetVersions = await store.listAssetVersions();
     const lockedAssets = (
       await Promise.all(assetVersions.map((version) => store.getLockedAssetByVersion(version.id)))
     ).filter((entry): entry is LockedAsset => entry !== null);
-
-    const allCreators = await store.listCreators();
 
     if (!includePrivate) {
       // Only expose product metadata for listings buyers can actually see.
@@ -654,9 +665,18 @@ export class MarketplaceService {
     return { deleted: true };
   }
 
-  /** True when direct-payout (Stripe Connect) mode is active. */
+  /**
+   * True when direct payouts (Stripe Connect) are available — i.e. the active
+   * payment adapter supports them. There is no separate on/off flag: direct
+   * payouts engage automatically for any seller who has connected an account.
+   */
   connectEnabled(): boolean {
-    return this.opts.connect?.enabled === true;
+    const adapter = this.opts.payments as Partial<ConnectOps>;
+    return (
+      typeof adapter.createConnectedAccount === "function" &&
+      typeof adapter.createOnboardingLink === "function" &&
+      typeof adapter.getAccountStatus === "function"
+    );
   }
 
   private connectAdapter(): ConnectOps {
@@ -909,21 +929,25 @@ export class MarketplaceService {
       await store.insertBuyer(buyer);
     }
 
-    // Direct-payout mode: route the charge to the creator's connected account so
-    // funds settle to the creator, not the platform. Block sale until ready.
+    // Direct payouts: a connected seller is charged directly so funds settle to
+    // them, never the platform. A signed-up seller who hasn't connected can't be
+    // paid, so their items aren't purchasable yet. The platform's own legacy/demo
+    // listings (no owner account) use the platform account.
     let connectExtras: { connectedAccountId: string; applicationFeeAmount: number } | undefined;
     if (this.connectEnabled()) {
       const creator = await store.getCreator(listing.creatorId);
-      if (!creator?.stripeAccountId || creator.payoutsEnabled !== true) {
+      if (creator?.payoutsEnabled === true && creator.stripeAccountId) {
+        const feeBps = this.opts.connect?.applicationFeeBps ?? 0;
+        connectExtras = {
+          connectedAccountId: creator.stripeAccountId,
+          applicationFeeAmount: Math.round((listing.priceAmount * feeBps) / 10000)
+        };
+      } else if (creator?.userId) {
         throw new Error(
-          "This creator has not finished setting up direct payouts, so this listing cannot be purchased yet."
+          "This seller hasn't connected payouts yet, so this item isn't purchasable. Sellers connect payouts from their dashboard."
         );
       }
-      const feeBps = this.opts.connect?.applicationFeeBps ?? 0;
-      connectExtras = {
-        connectedAccountId: creator.stripeAccountId,
-        applicationFeeAmount: Math.round((listing.priceAmount * feeBps) / 10000)
-      };
+      // else: platform/legacy listing with no seller account → platform charge.
     }
 
     const session = await payments.createCheckout({ listing, buyer, ...(connectExtras ?? {}) });

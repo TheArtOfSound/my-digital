@@ -636,12 +636,38 @@ describe("Direct payouts (Stripe Connect)", () => {
     expect(fee).toBe(95); // 5% of 1900
   });
 
-  it("refuses checkout until the creator has finished payout onboarding", async () => {
+  it("blocks a signed-up seller's checkout until they connect payouts", async () => {
     const { service } = await makeConnectService();
-    const { listing } = await seedListing(service);
+    const { user } = await service.signup({
+      email: "unconnected-seller@example.com",
+      password: "sellerpass9",
+      displayName: "Unconnected Seller"
+    });
+    await service.becomeSeller(user.id);
+    const { listing } = await service.createLockedListing(
+      {
+        title: "Pack",
+        description: "Test",
+        category: "ai-prompt-pack",
+        priceAmount: 1900,
+        priceCurrency: "USD",
+        licenseTerms: demoPersonalLicenseTerms,
+        fileName: "pack.txt",
+        mimeType: "text/plain",
+        payload: PAYLOAD
+      },
+      user.id
+    );
     await expect(
       service.beginCheckout({ listingId: listing.id, email: "buyer@example.com" })
-    ).rejects.toThrow(/direct payouts/);
+    ).rejects.toThrow(/connected payouts/);
+  });
+
+  it("still sells the platform's own legacy listing (no owner account) via the platform", async () => {
+    const { service } = await makeConnectService();
+    const { listing } = await seedListing(service); // ensureCreator → no userId
+    const begun = await service.beginCheckout({ listingId: listing.id, email: "b2@example.com" });
+    expect(begun.session.connectedAccountId).toBeUndefined();
   });
 
   it("does not record payouts as enabled when Stripe says details are incomplete", async () => {
