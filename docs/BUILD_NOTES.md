@@ -330,3 +330,19 @@ Live wiring: webhook endpoint `we_1Thgc9…` registered at Stripe for checkout.s
 Verified on production: health reports stripe (adapter constructed on workerd); `begin` minted a real live Checkout Session from the Worker with a reachable hosted page; `complete` on the open session refused honestly; after expiring the session at Stripe, `complete` settled the purchase as failed in D1 with no license minted; the live checkout page renders the Stripe flow. The expired session was cleaned up; no charges occurred.
 
 Remaining, by definition human: one real-card purchase end to end (hosted page → /checkout/done → code/vault). Revenue currently lands in the Trend Stripe account; moving to a My Digital-branded Stripe account later means swapping two Worker secrets and re-registering the webhook.
+
+## 2026-07-10 — Homepage revamp: use-case storytelling + polish pass
+
+- docs/PRODUCT_IDEAS.md: 140-item brainstorm backlog (use cases, trust, seller
+  tools, licensing, discovery, payments, ops, growth, UX, risks). Nothing
+  implemented from it except distilled homepage content.
+- apps/web/src/lib/useCases.ts: 12 "what you can sell here" cards + seller/
+  buyer audience points, rendered on the homepage so an empty storefront still
+  communicates what the marketplace is for.
+- HomePage: hero proof-strip (direct payouts / verifiable receipts / sealed
+  delivery), use-case grid, For sellers / For buyers split, closing CTA band.
+- styles.css: new showcase components (proof-strip, usecase-grid, split-grid,
+  cta-band), global :focus-visible outlines, section-head wrap fix on mobile.
+- Verified: preview desktop + 375px mobile (no horizontal overflow — headless
+  narrow-window clipping was a capture artifact, not a page bug); 4 web tests
+  pass; deployed version 23cdf2b9 and re-verified on production.
